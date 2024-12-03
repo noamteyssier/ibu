@@ -1,16 +1,27 @@
 use crate::{Header, Record};
-use std::io::Read;
+use std::io::{self, Read};
 
-pub fn read_header<R: Read>(reader: &mut R) -> Result<Header, bincode::Error> {
-    bincode::deserialize_from(reader)
+// Reader using raw implementation
+pub struct Reader<R: Read> {
+    reader: R,
+    header: Header,
 }
-
-pub fn read_records<R: Read>(reader: &mut R) -> Result<Vec<Record>, bincode::Error> {
-    bincode::deserialize_from(reader)
+impl<R: Read> Reader<R> {
+    pub fn new(mut reader: R) -> Result<Self, io::Error> {
+        let header = Header::from_bytes(&mut reader)?;
+        Ok(Self { reader, header })
+    }
+    pub fn header(&self) -> Header {
+        self.header
+    }
 }
+impl<R: Read> Iterator for Reader<R> {
+    type Item = Record;
 
-pub fn read_collection<R: Read>(reader: &mut R) -> Result<(Header, Vec<Record>), bincode::Error> {
-    let header = read_header(reader)?;
-    let records = read_records(reader)?;
-    Ok((header, records))
+    fn next(&mut self) -> Option<Self::Item> {
+        match Record::from_bytes(&mut self.reader) {
+            Ok(record) => Some(record),
+            Err(_) => None,
+        }
+    }
 }

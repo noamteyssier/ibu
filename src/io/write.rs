@@ -1,20 +1,25 @@
 use crate::{Header, Record};
 use std::io::Write;
 
-pub fn write_header<W: Write>(header: &Header, writer: &mut W) -> Result<(), bincode::Error> {
-    bincode::serialize_into(writer, header)
+pub struct Writer<W: Write> {
+    writer: W,
+    header: Header,
 }
-
-pub fn write_records<W: Write>(records: &[Record], writer: &mut W) -> Result<(), bincode::Error> {
-    bincode::serialize_into(writer, records)
-}
-
-pub fn write_collection<W: Write>(
-    header: &Header,
-    records: &[Record],
-    writer: &mut W,
-) -> Result<(), bincode::Error> {
-    write_header(header, writer)?;
-    write_records(records, writer)?;
-    Ok(())
+impl<W: Write> Writer<W> {
+    pub fn new(writer: W, header: Header) -> Self {
+        Self { writer, header }
+    }
+    pub fn write_collection(&mut self, records: &[Record]) -> Result<(), std::io::Error> {
+        self.write_iter(records.iter().copied())
+    }
+    pub fn write_iter<I: Iterator<Item = Record>>(
+        &mut self,
+        records: I,
+    ) -> Result<(), std::io::Error> {
+        self.header.write_bytes(&mut self.writer)?;
+        for record in records {
+            record.write_bytes(&mut self.writer)?;
+        }
+        Ok(())
+    }
 }
