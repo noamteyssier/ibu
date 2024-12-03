@@ -1,11 +1,12 @@
+use bon::Builder;
 use byteorder::{ByteOrder, LittleEndian};
 use std::io::Write;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Builder)]
 pub struct Record {
-    pub barcode: u64,
-    pub umi: u64,
-    pub index: u64,
+    barcode: u64,
+    umi: u64,
+    index: u64,
 }
 impl Record {
     pub fn new(barcode: u64, umi: u64, index: u64) -> Self {
@@ -14,6 +15,15 @@ impl Record {
             umi,
             index,
         }
+    }
+    pub fn barcode(&self) -> u64 {
+        self.barcode
+    }
+    pub fn umi(&self) -> u64 {
+        self.umi
+    }
+    pub fn index(&self) -> u64 {
+        self.index
     }
     pub fn write_bytes<W: Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
         let mut buffer = [0u8; 24];

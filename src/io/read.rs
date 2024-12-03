@@ -1,7 +1,6 @@
 use crate::{Header, Record};
 use std::io::{self, Read};
 
-// Reader using raw implementation
 pub struct Reader<R: Read> {
     reader: R,
     header: Header,
