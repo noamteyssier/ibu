@@ -16,7 +16,4 @@ pub enum BinaryFormatError {
 
     #[error("Attempted to read record from empty or corrupted data")]
     InvalidRecord { actual: usize },
-
-    #[error("Record values exceed maximum allowed by header specification")]
-    RecordValueOverflow { barcode_len: u32, umi_len: u32 },
 }
