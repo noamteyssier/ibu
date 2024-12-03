@@ -2,6 +2,8 @@ use bon::Builder;
 use byteorder::{ByteOrder, LittleEndian};
 use std::io::Write;
 
+use crate::BinaryFormatError;
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Builder)]
 pub struct Record {
     barcode: u64,
@@ -25,6 +27,13 @@ impl Record {
     pub fn index(&self) -> u64 {
         self.index
     }
+    fn from_bytes_buffer(buffer: &[u8; 24]) -> Self {
+        Self {
+            barcode: LittleEndian::read_u64(&buffer[0..8]),
+            umi: LittleEndian::read_u64(&buffer[8..16]),
+            index: LittleEndian::read_u64(&buffer[16..24]),
+        }
+    }
     pub fn write_bytes<W: Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
         let mut buffer = [0u8; 24];
         LittleEndian::write_u64(&mut buffer[0..8], self.barcode);
@@ -32,14 +41,25 @@ impl Record {
         LittleEndian::write_u64(&mut buffer[16..24], self.index);
         writer.write_all(&buffer)
     }
-    pub fn from_bytes<R: std::io::Read>(reader: &mut R) -> Result<Self, std::io::Error> {
-        let mut buffer = [0u8; 24];
-        reader.read_exact(&mut buffer)?;
-        Ok(Self {
-            barcode: LittleEndian::read_u64(&buffer[0..8]),
-            umi: LittleEndian::read_u64(&buffer[8..16]),
-            index: LittleEndian::read_u64(&buffer[16..24]),
-        })
+    pub fn from_bytes<R: std::io::Read>(reader: &mut R) -> Result<Option<Self>, BinaryFormatError> {
+        let mut first = [0u8; 1];
+        let mut remainder = [0u8; 23];
+
+        // If we can't read the first byte, we're at the end of the file
+        if reader.read_exact(&mut first).is_err() {
+            return Ok(None);
+        }
+
+        // Otherwise, read the rest of the record
+        if reader.read_exact(&mut remainder).is_err() {
+            return Err(BinaryFormatError::InvalidRecord);
+        }
+
+        // Join the two buffers
+        let mut buffer = [first[0]; 24];
+        buffer[1..].copy_from_slice(&remainder);
+
+        Ok(Some(Self::from_bytes_buffer(&buffer)))
     }
 }
 impl PartialOrd for Record {

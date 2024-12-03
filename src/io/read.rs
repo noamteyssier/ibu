@@ -1,4 +1,4 @@
-use crate::{Header, Record};
+use crate::{BinaryFormatError, Header, Record};
 use std::io::{self, Read};
 
 pub struct Reader<R: Read> {
@@ -15,12 +15,13 @@ impl<R: Read> Reader<R> {
     }
 }
 impl<R: Read> Iterator for Reader<R> {
-    type Item = Record;
+    type Item = Result<Record, BinaryFormatError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match Record::from_bytes(&mut self.reader) {
-            Ok(record) => Some(record),
-            Err(_) => None,
+            Ok(Some(record)) => Some(Ok(record)),
+            Ok(None) => None,
+            Err(e) => Some(Err(e)),
         }
     }
 }

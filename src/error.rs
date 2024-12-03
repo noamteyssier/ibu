@@ -15,5 +15,5 @@ pub enum BinaryFormatError {
     InvalidUMILength(u32),
 
     #[error("Attempted to read record from empty or corrupted data")]
-    InvalidRecord { actual: usize },
+    InvalidRecord,
 }

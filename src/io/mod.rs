@@ -66,7 +66,7 @@ mod tests {
         let reader = Reader::new(&mut cursor).unwrap();
         let mut read_records = Vec::new();
         for record in reader {
-            read_records.push(record);
+            read_records.push(record.unwrap());
         }
         assert_eq!(records, read_records);
     }
@@ -88,7 +88,7 @@ mod tests {
         let read_header = reader.header();
         let mut read_records = Vec::new();
         for record in reader {
-            read_records.push(record);
+            read_records.push(record.unwrap());
         }
 
         assert_eq!(header, read_header);
