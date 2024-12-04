@@ -1,7 +1,14 @@
 [package]
 name = "ibu"
+authors = ["Noam Teyssier <noam.teyssier@arcinstitute.org"]
+repository = "https://github.com/noamteyssier/ibu"
+documentation = "https://docs.rs/ibu"
+description = "A library for high throughput binary encoding genomic sequences"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+keywords = ["bioinformatics", "genomics", "binary", "encoding", "compression"]
+categories = ["science", "data-encoding"]
 
 [features]
 serde = ["dep:serde"]
