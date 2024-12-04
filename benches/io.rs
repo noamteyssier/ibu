@@ -30,7 +30,7 @@ fn create_test_data(record_count: usize) -> (Header, Vec<Record>) {
 // Compare against raw bincode deserialization
 fn bench_io(c: &mut Criterion) {
     let mut group = c.benchmark_group("io");
-    let num_records = 1_000_000_000;
+    let num_records = 1_000_000;
     let (header, records) = create_test_data(num_records);
 
     // benchmark raw writing
