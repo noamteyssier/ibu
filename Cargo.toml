@@ -8,7 +8,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 keywords = ["bioinformatics", "genomics", "binary", "encoding", "compression"]
-categories = ["science", "data-encoding"]
+categories = ["science", "data-structures", "encoding"]
 
 [features]
 serde = ["dep:serde"]
