@@ -3,6 +3,26 @@ use std::io::Write;
 
 use crate::{BinaryFormatError, SIZE_RECORD};
 
+/// A record in a binary collection file
+///
+/// A record contains a barcode, UMI, and index.
+///
+/// The record is 24 bytes long:
+///
+/// - 8 bytes for the barcode
+/// - 8 bytes for the UMI
+/// - 8 bytes for the index
+///
+/// # Example
+/// ```
+/// use ibu::Record;
+///
+/// let record = Record::new(0x00001100, 0x00011, 0);
+///
+/// assert_eq!(record.barcode(), 0x00001100);
+/// assert_eq!(record.umi(), 0x00011);
+/// assert_eq!(record.index(), 0);
+/// ```
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Record {
@@ -11,6 +31,7 @@ pub struct Record {
     index: u64,
 }
 impl Record {
+    /// Create a new record
     pub fn new(barcode: u64, umi: u64, index: u64) -> Self {
         Self {
             barcode,
@@ -18,15 +39,19 @@ impl Record {
             index,
         }
     }
+    /// Get the barcode
     pub fn barcode(&self) -> u64 {
         self.barcode
     }
+    /// Get the UMI
     pub fn umi(&self) -> u64 {
         self.umi
     }
+    /// Get the index
     pub fn index(&self) -> u64 {
         self.index
     }
+    /// Read a record from a byte buffer
     fn from_bytes_buffer(buffer: &[u8; SIZE_RECORD]) -> Self {
         Self {
             barcode: LittleEndian::read_u64(&buffer[0..8]),
@@ -34,6 +59,7 @@ impl Record {
             index: LittleEndian::read_u64(&buffer[16..24]),
         }
     }
+    /// Write a record to a byte buffer
     pub fn write_bytes<W: Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
         let mut buffer = [0u8; SIZE_RECORD];
         LittleEndian::write_u64(&mut buffer[0..8], self.barcode);
@@ -41,6 +67,7 @@ impl Record {
         LittleEndian::write_u64(&mut buffer[16..24], self.index);
         writer.write_all(&buffer)
     }
+    /// Read a record from a reader
     pub fn from_bytes<R: std::io::Read>(reader: &mut R) -> Result<Option<Self>, BinaryFormatError> {
         let mut first = [0u8; 1];
         let mut remainder = [0u8; 23];
@@ -80,11 +107,13 @@ impl Record {
         }
     }
 }
+/// Implement ordering for records
 impl PartialOrd for Record {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
+/// Implement ordering for records
 impl Ord for Record {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.barcode
