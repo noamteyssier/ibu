@@ -1,10 +1,12 @@
 use crate::{Header, Record};
 use std::io::Write;
 
+/// A writer for a binary collection file
 pub struct Writer<W: Write> {
     writer: W,
     header: Header,
 }
+/// Write records to a binary collection file
 impl<W: Write> Writer<W> {
     pub fn new(writer: W, header: Header) -> Self {
         Self { writer, header }

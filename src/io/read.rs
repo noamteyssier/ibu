@@ -1,6 +1,7 @@
 use crate::{BinaryFormatError, Header, Record};
 use std::io::Read;
 
+/// A reader for a binary collection file
 pub struct Reader<R: Read> {
     reader: R,
     header: Header,
@@ -14,6 +15,7 @@ impl<R: Read> Reader<R> {
         self.header
     }
 }
+/// An iterator for a binary collection file
 impl<R: Read> Iterator for Reader<R> {
     type Item = Result<Record, BinaryFormatError>;
 
