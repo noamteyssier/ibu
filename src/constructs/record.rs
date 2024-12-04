@@ -46,20 +46,38 @@ impl Record {
         let mut remainder = [0u8; 23];
 
         // If we can't read the first byte, we're at the end of the file
-        if reader.read_exact(&mut first).is_err() {
-            return Ok(None);
-        }
+        // Try to read the first byte
+        match reader.read_exact(&mut first) {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                // Clean EOF - no more records
+                return Ok(None);
+            }
+            Err(e) => {
+                // Some other IO error occurred
+                return Err(e.into());
+            }
+        };
 
         // Otherwise, read the rest of the record
-        if reader.read_exact(&mut remainder).is_err() {
-            return Err(BinaryFormatError::InvalidRecord);
+        match reader.read_exact(&mut remainder) {
+            Ok(_) => {
+                // Join the two buffers
+                let mut buffer = [first[0]; 24];
+                buffer[1..].copy_from_slice(&remainder);
+
+                // Return the record
+                Ok(Some(Self::from_bytes_buffer(&buffer)))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                // Unexpected EOF - incomplete record
+                Err(BinaryFormatError::InvalidRecord)
+            }
+            Err(e) => {
+                // Some other IO error occurred
+                Err(e.into())
+            }
         }
-
-        // Join the two buffers
-        let mut buffer = [first[0]; 24];
-        buffer[1..].copy_from_slice(&remainder);
-
-        Ok(Some(Self::from_bytes_buffer(&buffer)))
     }
 }
 impl PartialOrd for Record {

@@ -1,5 +1,5 @@
 use bon::bon;
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use std::io::Write;
 
 use crate::{BinaryFormatError, MAX_BARCODE_LEN, MAX_UMI_LEN, VERSION};
@@ -48,6 +48,14 @@ impl Header {
     pub fn sorted(&self) -> bool {
         self.sorted
     }
+    fn from_bytes_buffer(buffer: &[u8; 13]) -> Result<Self, BinaryFormatError> {
+        Self::builder()
+            .version(LittleEndian::read_u32(&buffer[0..4]))
+            .bc_len(LittleEndian::read_u32(&buffer[4..8]))
+            .umi_len(LittleEndian::read_u32(&buffer[8..12]))
+            .sorted(buffer[12] != 0)
+            .build()
+    }
     pub fn write_bytes<W: Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
         writer.write_u32::<LittleEndian>(self.version)?;
         writer.write_u32::<LittleEndian>(self.bc_len)?;
@@ -55,12 +63,12 @@ impl Header {
         writer.write_u8(self.sorted as u8)?;
         Ok(())
     }
-    pub fn from_bytes<R: std::io::Read>(reader: &mut R) -> Result<Self, std::io::Error> {
-        Ok(Self {
-            version: reader.read_u32::<LittleEndian>()?,
-            bc_len: reader.read_u32::<LittleEndian>()?,
-            umi_len: reader.read_u32::<LittleEndian>()?,
-            sorted: reader.read_u8()? != 0,
-        })
+    pub fn from_bytes<R: std::io::Read>(reader: &mut R) -> Result<Self, BinaryFormatError> {
+        let mut buffer = [0u8; 13];
+        match reader.read_exact(&mut buffer) {
+            Ok(_) => {}
+            Err(e) => return Err(e.into()),
+        }
+        Self::from_bytes_buffer(&buffer)
     }
 }

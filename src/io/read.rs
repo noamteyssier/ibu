@@ -1,12 +1,12 @@
 use crate::{BinaryFormatError, Header, Record};
-use std::io::{self, Read};
+use std::io::Read;
 
 pub struct Reader<R: Read> {
     reader: R,
     header: Header,
 }
 impl<R: Read> Reader<R> {
-    pub fn new(mut reader: R) -> Result<Self, io::Error> {
+    pub fn new(mut reader: R) -> Result<Self, BinaryFormatError> {
         let header = Header::from_bytes(&mut reader)?;
         Ok(Self { reader, header })
     }
