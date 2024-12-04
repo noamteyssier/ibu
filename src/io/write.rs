@@ -22,6 +22,6 @@ impl<W: Write> Writer<W> {
         for record in records {
             record.write_bytes(&mut self.writer)?;
         }
-        Ok(())
+        self.writer.flush()
     }
 }
