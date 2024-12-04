@@ -1,7 +1,7 @@
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use std::io::Write;
 
-use crate::{BinaryFormatError, MAX_BARCODE_LEN, MAX_UMI_LEN, VERSION};
+use crate::{BinaryFormatError, MAX_BARCODE_LEN, MAX_UMI_LEN, SIZE_HEADER, VERSION};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -46,7 +46,7 @@ impl Header {
     pub fn sorted(&self) -> bool {
         self.sorted
     }
-    fn from_bytes_buffer(buffer: &[u8; 13]) -> Result<Self, BinaryFormatError> {
+    fn from_bytes_buffer(buffer: &[u8; SIZE_HEADER]) -> Result<Self, BinaryFormatError> {
         Self::new(
             LittleEndian::read_u32(&buffer[0..4]),
             LittleEndian::read_u32(&buffer[4..8]),
@@ -62,7 +62,7 @@ impl Header {
         Ok(())
     }
     pub fn from_bytes<R: std::io::Read>(reader: &mut R) -> Result<Self, BinaryFormatError> {
-        let mut buffer = [0u8; 13];
+        let mut buffer = [0u8; SIZE_HEADER];
         match reader.read_exact(&mut buffer) {
             Ok(_) => {}
             Err(e) => return Err(e.into()),

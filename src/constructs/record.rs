@@ -1,7 +1,7 @@
 use byteorder::{ByteOrder, LittleEndian};
 use std::io::Write;
 
-use crate::BinaryFormatError;
+use crate::{BinaryFormatError, SIZE_RECORD};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -27,7 +27,7 @@ impl Record {
     pub fn index(&self) -> u64 {
         self.index
     }
-    fn from_bytes_buffer(buffer: &[u8; 24]) -> Self {
+    fn from_bytes_buffer(buffer: &[u8; SIZE_RECORD]) -> Self {
         Self {
             barcode: LittleEndian::read_u64(&buffer[0..8]),
             umi: LittleEndian::read_u64(&buffer[8..16]),
@@ -35,7 +35,7 @@ impl Record {
         }
     }
     pub fn write_bytes<W: Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
-        let mut buffer = [0u8; 24];
+        let mut buffer = [0u8; SIZE_RECORD];
         LittleEndian::write_u64(&mut buffer[0..8], self.barcode);
         LittleEndian::write_u64(&mut buffer[8..16], self.umi);
         LittleEndian::write_u64(&mut buffer[16..24], self.index);
@@ -63,7 +63,7 @@ impl Record {
         match reader.read_exact(&mut remainder) {
             Ok(_) => {
                 // Join the two buffers
-                let mut buffer = [first[0]; 24];
+                let mut buffer = [first[0]; SIZE_RECORD];
                 buffer[1..].copy_from_slice(&remainder);
 
                 // Return the record
