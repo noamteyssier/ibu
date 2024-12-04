@@ -1,10 +1,9 @@
-use bon::Builder;
 use byteorder::{ByteOrder, LittleEndian};
 use std::io::Write;
 
 use crate::BinaryFormatError;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Builder)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Record {
     barcode: u64,

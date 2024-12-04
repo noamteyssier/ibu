@@ -11,25 +11,11 @@ mod tests {
     use std::io::Cursor;
 
     fn create_test_data() -> (Header, Vec<Record>) {
-        let header = Header::builder()
-            .version(1)
-            .bc_len(16)
-            .umi_len(8)
-            .sorted(true)
-            .build()
-            .unwrap();
+        let header = Header::new(1, 16, 8, true).unwrap();
 
         let records = vec![
-            Record::builder()
-                .index(0)
-                .barcode(0x0123456789ABCDEF)
-                .umi(0x12345678)
-                .build(),
-            Record::builder()
-                .index(1)
-                .barcode(0x1234567890ABCDEF)
-                .umi(0xABCDEF12)
-                .build(),
+            Record::new(0, 0x0123456789ABCDEF, 0x12345678),
+            Record::new(1, 0x1234567890ABCDEF, 0xABCDEF12),
         ];
 
         (header, records)

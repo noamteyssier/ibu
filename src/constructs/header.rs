@@ -1,4 +1,3 @@
-use bon::bon;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use std::io::Write;
 
@@ -12,9 +11,7 @@ pub struct Header {
     umi_len: u32,
     sorted: bool,
 }
-#[bon]
 impl Header {
-    #[builder]
     pub fn new(
         version: u32,
         bc_len: u32,
@@ -50,12 +47,12 @@ impl Header {
         self.sorted
     }
     fn from_bytes_buffer(buffer: &[u8; 13]) -> Result<Self, BinaryFormatError> {
-        Self::builder()
-            .version(LittleEndian::read_u32(&buffer[0..4]))
-            .bc_len(LittleEndian::read_u32(&buffer[4..8]))
-            .umi_len(LittleEndian::read_u32(&buffer[8..12]))
-            .sorted(buffer[12] != 0)
-            .build()
+        Self::new(
+            LittleEndian::read_u32(&buffer[0..4]),
+            LittleEndian::read_u32(&buffer[4..8]),
+            LittleEndian::read_u32(&buffer[8..12]),
+            buffer[12] != 0,
+        )
     }
     pub fn write_bytes<W: Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
         writer.write_u32::<LittleEndian>(self.version)?;
