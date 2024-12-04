@@ -5,6 +5,7 @@ use std::io::Write;
 use crate::{BinaryFormatError, MAX_BARCODE_LEN, MAX_UMI_LEN, VERSION};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Header {
     version: u32,
     bc_len: u32,

@@ -267,6 +267,7 @@ dependencies = [
  "bon",
  "byteorder",
  "criterion",
+ "serde",
  "thiserror",
 ]
 

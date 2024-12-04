@@ -5,6 +5,7 @@ use std::io::Write;
 use crate::BinaryFormatError;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Builder)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Record {
     barcode: u64,
     umi: u64,
