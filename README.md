@@ -1,5 +1,9 @@
 # ibu
 
+[![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE.md)
+[![Crates.io](https://img.shields.io/crates/d/ibu?color=orange&label=crates.io)](https://crates.io/crates/ibu)
+[![docs.rs](https://img.shields.io/docsrs/ibu?color=green&label=docs.rs)](https://docs.rs/ibu/latest/ibu/)
+
 `ibu` is a Rust library for efficiently handling binary-encoding barcode, UMI, and index data in
 high-throughput genomics applications.
 
