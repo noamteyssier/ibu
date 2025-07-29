@@ -5,6 +5,9 @@ pub enum BinaryFormatError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("Niffler error: {0}")]
+    Niffler(#[from] niffler::Error),
+
     #[error("Invalid version {0} in header")]
     InvalidVersion(u32),
 
