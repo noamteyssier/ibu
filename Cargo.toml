@@ -15,11 +15,13 @@ serde = ["dep:serde"]
 
 [dependencies]
 byteorder = "1.5.0"
+niffler = "3.0.0"
 serde = { version = "1.0.215", features = ["derive"], optional = true }
 thiserror = "2.0.4"
 
 [dev-dependencies]
 criterion = "0.5.1"
+tempfile = "3.20.0"
 
 [[bench]]
 name = "io"
