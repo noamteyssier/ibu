@@ -86,7 +86,7 @@ mod testing {
     use tempfile::NamedTempFile;
 
     fn create_test_data() -> (Header, Vec<Record>) {
-        let header = Header::new(1, 16, 8, true).unwrap();
+        let header = Header::new(16, 8, true, true).unwrap();
 
         let records = vec![
             Record::new(0, 0x0123456789ABCDEF, 0x12345678),

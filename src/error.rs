@@ -9,14 +9,14 @@ pub enum BinaryFormatError {
     #[error("Niffler error: {0}")]
     Niffler(#[from] niffler::Error),
 
-    #[error("Invalid version {0} in header")]
-    InvalidVersion(u32),
+    #[error("Invalid version ({0}) in header. Expected {1}")]
+    InvalidVersion(u8, u8),
 
     #[error("Invalid barcode length {0}")]
-    InvalidBarcodeLength(u32),
+    InvalidBarcodeLength(u8),
 
     #[error("Invalid UMI length {0}")]
-    InvalidUMILength(u32),
+    InvalidUMILength(u8),
 
     #[error("Attempted to read record from empty or corrupted data")]
     InvalidRecord,

@@ -6,12 +6,10 @@ use std::{
 
 use ibu::{Header, Record};
 
-// use ibu::{constructs::Ibu, Header, Reader, Record};
-
 // Helper to create test data of different sizes
 fn create_test_data(record_count: usize) -> (Header, Vec<Record>) {
     // Write header
-    let header = Header::new(1, 16, 12, false).unwrap();
+    let header = Header::new(16, 12, false, false).unwrap();
 
     // Write records
     let mut records = Vec::new();

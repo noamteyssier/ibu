@@ -13,14 +13,16 @@
 //!
 //! ## Header
 //!
-//! The header is strictly defined in the following 13 bytes:
+//! The header is strictly defined in the following 8 bytes:
 //!
 //! | Field | Type | Description |
 //! | --- | --- | --- |
-//! | Version | `u32` | The version of the binary format |
-//! | Barcode Length | `u32` | The length of the barcode field in bits (MAX = 32) |
-//! | UMI Length | `u32` | The length of the UMI field in bits (MAX = 32) |
-//! | Sorted | `bool` | Whether the records are sorted |
+//! | Version | `u8` | The version of the binary format |
+//! | Barcode Length | `u8` | The length of the barcode field in bits (MAX = 32) |
+//! | UMI Length | `u8` | The length of the UMI field in bits (MAX = 32) |
+//! | Sorted | `bool` / `u8` | Whether the records are sorted |
+//! | Compressed | `bool` / `u8` | Whether the records are compressed (zstd) |
+//! | Reserved | `[u8; 3]` | Reserved for future use |
 //!
 //! ## Record
 //!
@@ -32,10 +34,10 @@
 //! | UMI | `u64` | The UMI represented with 2bit encoding |
 //! | Index | `u64` | A numerical index (abstract application specific usage for users) |
 //!
-//! Importantly, the barcode and UMI fields are encoded with 2bit encoding, which means that the
+//! Importantly, the barcode and UMI fields are encoded with two-bit encoding, which means that the
 //! maximum barcode and UMI lengths are 32 bits.
 //!
-//! For 2bit {en,de}coding in rust feel free to check out [bitnuc](https://crates.io/crates/bitnuc).
+//! For two-bit {en,de}coding in rust feel free to check out [bitnuc](https://crates.io/crates/bitnuc).
 //!
 //! Users may choose to encode their own data into the index field or use it for other purposes.
 //!
@@ -55,7 +57,7 @@
 //! use std::io::Cursor;
 //!
 //! // Create a header for 4-base barcodes and 3-base UMIs (assume unsorted)
-//! let header = Header::new(1, 4, 3, false).unwrap();
+//! let header = Header::new(4, 3, false, false).unwrap();
 //!
 //! // Create some records
 //! let records = vec![
@@ -73,8 +75,8 @@
 //! // Get the written buffer
 //! let buffer = writer.into_inner().into_inner();
 //!
-//! // The expected buffer should be exact 13 + 24 * 2 = 61 bytes
-//! assert_eq!(buffer.len(), 61);
+//! // The expected buffer should be exact 8 + 24 * 2 = 56 bytes
+//! assert_eq!(buffer.len(), 56);
 //!
 //! // Read from a file
 //! let file = Cursor::new(buffer);
@@ -111,16 +113,16 @@ pub use error::BinaryFormatError;
 pub use io::{Reader, Writer};
 
 // Version of the binary format
-pub const VERSION: u32 = 1;
+pub const VERSION: u8 = 2;
 
 // Maximum lengths for barcode (assumes 2bit encoding)
-pub const MAX_BARCODE_LEN: u32 = 32;
+pub const MAX_BARCODE_LEN: u8 = 32;
 
 // Maximum lengths for UMI (assumes 2bit encoding)
-pub const MAX_UMI_LEN: u32 = 32;
+pub const MAX_UMI_LEN: u8 = 32;
 
 // Size of the header in bytes
-pub const SIZE_HEADER: usize = 13;
+pub const SIZE_HEADER: usize = 8;
 
 // Size of a record in bytes
 pub const SIZE_RECORD: usize = 24;
