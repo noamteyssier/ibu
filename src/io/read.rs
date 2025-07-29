@@ -32,14 +32,30 @@ impl<R: Read> Reader<R> {
 impl Reader<BoxedReader> {
     pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, BinaryFormatError> {
         let rdr = File::open(path).map(BufReader::new)?;
-        let (pt, _format) = niffler::send::get_reader(Box::new(rdr))?;
-        Self::new(pt)
+
+        #[cfg(feature = "niffler")]
+        {
+            let (pt, _format) = niffler::send::get_reader(Box::new(rdr))?;
+            Self::new(pt)
+        }
+        #[cfg(not(feature = "niffler"))]
+        {
+            Self::new(Box::new(rdr))
+        }
     }
 
     pub fn from_stdin() -> Result<Self, BinaryFormatError> {
         let rdr = Box::new(std::io::stdin());
-        let (pt, _format) = niffler::send::get_reader(rdr)?;
-        Self::new(pt)
+
+        #[cfg(feature = "niffler")]
+        {
+            let (pt, _format) = niffler::send::get_reader(rdr)?;
+            Self::new(pt)
+        }
+        #[cfg(not(feature = "niffler"))]
+        {
+            Self::new(rdr)
+        }
     }
 
     pub fn from_optional_path<P: AsRef<Path>>(path: Option<P>) -> Result<Self, BinaryFormatError> {
@@ -65,12 +81,9 @@ impl<R: Read> Iterator for Reader<R> {
 
 #[cfg(test)]
 mod testing {
-    use std::io::Write;
-
-    use niffler::Level;
-    use tempfile::NamedTempFile;
-
     use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
 
     fn create_test_data() -> (Header, Vec<Record>) {
         let header = Header::new(1, 16, 8, true).unwrap();
@@ -109,6 +122,7 @@ mod testing {
         Ok(())
     }
 
+    #[cfg(feature = "niffler")]
     #[test]
     fn test_reader_zstd() -> Result<(), BinaryFormatError> {
         let (header, records) = create_test_data();
@@ -140,6 +154,7 @@ mod testing {
         Ok(())
     }
 
+    #[cfg(feature = "niffler")]
     #[test]
     fn test_reader_gzip() -> Result<(), BinaryFormatError> {
         let (header, records) = create_test_data();

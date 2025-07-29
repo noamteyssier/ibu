@@ -5,6 +5,7 @@ pub enum BinaryFormatError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[cfg(feature = "niffler")]
     #[error("Niffler error: {0}")]
     Niffler(#[from] niffler::Error),
 
