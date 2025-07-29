@@ -133,7 +133,7 @@ mod testing {
             let mut writer = niffler::get_writer(
                 Box::new(file.as_file_mut()),
                 niffler::Format::Zstd,
-                Level::Three,
+                niffler::Level::Three,
             )?;
 
             header.write_bytes(&mut writer)?;
@@ -165,7 +165,7 @@ mod testing {
             let mut writer = niffler::get_writer(
                 Box::new(file.as_file_mut()),
                 niffler::Format::Gzip,
-                Level::Three,
+                niffler::Level::Three,
             )?;
 
             header.write_bytes(&mut writer)?;
