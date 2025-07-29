@@ -1,25 +1,29 @@
 [package]
 name = "ibu"
+version = "0.1.1"
 authors = ["Noam Teyssier <noam.teyssier@arcinstitute.org"]
 repository = "https://github.com/noamteyssier/ibu"
 documentation = "https://docs.rs/ibu"
 description = "A library for high throughput binary encoding genomic sequences"
-version = "0.1.0"
 edition = "2021"
 license = "MIT"
 keywords = ["bioinformatics", "genomics", "binary", "encoding", "compression"]
 categories = ["science", "data-structures", "encoding"]
 
 [features]
+default = ["serde", "niffler"]
 serde = ["dep:serde"]
+niffler = ["dep:niffler"]
 
 [dependencies]
 byteorder = "1.5.0"
+niffler = { version = "3.0.0", optional = true }
 serde = { version = "1.0.215", features = ["derive"], optional = true }
 thiserror = "2.0.4"
 
 [dev-dependencies]
 criterion = "0.5.1"
+tempfile = "3.20.0"
 
 [[bench]]
 name = "io"
