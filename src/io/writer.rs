@@ -1,6 +1,6 @@
 use std::{fs::File, io::Write, path::Path};
 
-use crate::{Header, RECORD_SIZE, Record};
+use crate::{Header, Record, RECORD_SIZE};
 
 const DEFAULT_BUFFER_SIZE: usize = 48 * 1024 * RECORD_SIZE;
 pub type BoxedWriter = Box<dyn Write + Send>;
