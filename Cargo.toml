@@ -1,6 +1,6 @@
 [package]
 name = "ibu"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Noam Teyssier <noam.teyssier@arcinstitute.org"]
 repository = "https://github.com/noamteyssier/ibu"
 documentation = "https://docs.rs/ibu"
