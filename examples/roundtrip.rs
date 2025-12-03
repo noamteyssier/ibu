@@ -120,7 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ========== Direct Load ===========
     let start = Instant::now();
-    let records = load_to_vec(filename)?;
+    let (_header, records) = load_to_vec(filename)?;
     let elapsed = start.elapsed();
     let load_rate = records.len() as f64 / elapsed.as_secs_f64() / 1_000_000.0;
     let load_bandwidth = (records.len() * 24) as f64 / elapsed.as_secs_f64() / 1_000_000_000.0;
