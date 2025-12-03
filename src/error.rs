@@ -1,23 +1,27 @@
 use thiserror::Error;
 
-#[derive(Debug, Error)]
-pub enum BinaryFormatError {
-    #[error("IO error: {0}")]
+pub type Result<T> = std::result::Result<T, IbuError>;
+
+#[derive(Error, Debug)]
+pub enum IbuError {
+    #[error("I/O error")]
     Io(#[from] std::io::Error),
 
-    #[cfg(feature = "niffler")]
-    #[error("Niffler error: {0}")]
+    #[error("Niffler error")]
     Niffler(#[from] niffler::Error),
 
-    #[error("Invalid version {0} in header")]
-    InvalidVersion(u32),
+    #[error("Invalid magic number, expected ({expected}), found ({actual})")]
+    InvalidMagicNumber { expected: u32, actual: u32 },
 
-    #[error("Invalid barcode length {0}")]
+    #[error("Truncated record at position {pos}")]
+    TruncatedRecord { pos: usize },
+
+    #[error("Invalid version found, expected ({expected}), found ({actual})")]
+    InvalidVersion { expected: u32, actual: u32 },
+
+    #[error("Invalid barcode length: {0}")]
     InvalidBarcodeLength(u32),
 
-    #[error("Invalid UMI length {0}")]
-    InvalidUMILength(u32),
-
-    #[error("Attempted to read record from empty or corrupted data")]
-    InvalidRecord,
+    #[error("Invalid UMI length: {0}")]
+    InvalidUmiLength(u32),
 }
