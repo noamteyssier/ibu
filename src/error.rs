@@ -1,3 +1,4 @@
+use std::error::Error as StdError;
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, IbuError>;
@@ -30,4 +31,22 @@ pub enum IbuError {
 
     #[error("Invalid index ({idx}) - Must be less than {max}")]
     InvalidIndex { idx: usize, max: usize },
+
+    /// Error occurred during parallel processing
+    #[error("Processing error: {0}")]
+    Process(Box<dyn StdError + Send + Sync>),
+}
+
+pub trait IntoIbuError {
+    fn into_ibu_error(self) -> IbuError;
+}
+
+// Implement conversion for Box<dyn Error>
+impl<E> IntoIbuError for E
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    fn into_ibu_error(self) -> IbuError {
+        IbuError::Process(self.into())
+    }
 }
