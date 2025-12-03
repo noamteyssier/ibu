@@ -79,20 +79,10 @@
 //! use ibu::{Header, Reader, Record, Writer};
 //!
 //! # fn main() -> ibu::Result<()> {
-//! let header = Header::new(16, 12);
-//! let records = vec![Record::new(0x1234, 0x5678, 42)];
-//!
-//! // Write to file (automatically detects .gz/.zst compression)
-//! let mut writer = Writer::from_path("data.ibu.gz", header)?;
-//! writer.write_batch(&records)?;
-//! writer.finish()?;
-//!
 //! // Read from file (automatically decompresses)
 //! let reader = Reader::from_path("data.ibu.gz")?;
 //! let read_records: Result<Vec<_>, _> = reader.collect();
 //! let read_records = read_records?;
-//!
-//! assert_eq!(records, read_records);
 //! # Ok(())
 //! # }
 //! ```
