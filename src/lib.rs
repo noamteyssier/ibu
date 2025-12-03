@@ -1,7 +1,9 @@
 mod constructs;
 mod error;
 mod io;
+mod parallel;
 
-pub use constructs::{HEADER_SIZE, Header, MAGIC, RECORD_SIZE, Record, VERSION};
+pub use constructs::{Header, Record, HEADER_SIZE, MAGIC, RECORD_SIZE, VERSION};
 pub use error::{IbuError, Result};
-pub use io::{Reader, Writer};
+pub use io::{load_to_vec, MmapReader, Reader, Writer};
+pub use parallel::{ParallelProcessor, ParallelReader};

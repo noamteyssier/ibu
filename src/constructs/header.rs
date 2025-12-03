@@ -59,4 +59,10 @@ impl Header {
         }
         Ok(())
     }
+    pub fn as_bytes(&self) -> &[u8] {
+        bytemuck::bytes_of(self)
+    }
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        *bytemuck::from_bytes(bytes)
+    }
 }

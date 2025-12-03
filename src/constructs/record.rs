@@ -3,7 +3,7 @@ use bytemuck::{Pod, Zeroable};
 pub const RECORD_SIZE: usize = std::mem::size_of::<Record>();
 
 /// 24-byte record (naturally aligned)
-#[derive(Copy, Clone, Pod, Zeroable, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Copy, Clone, Pod, Zeroable, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[cfg(feature = "serde")]
 #[derive(serde::Serialize, serde::Deserialize)]
 #[repr(C)]

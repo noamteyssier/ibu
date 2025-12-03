@@ -155,3 +155,30 @@ impl Reader<BoxedReader> {
         }
     }
 }
+
+pub fn load_to_vec<P: AsRef<Path>>(path: P) -> crate::Result<Vec<Record>> {
+    let mut file = File::open(path)?;
+
+    // Read and validate header
+    let mut header_bytes = [0u8; HEADER_SIZE];
+    file.read_exact(&mut header_bytes)?;
+    let header = crate::Header::from_bytes(&header_bytes);
+    header.validate()?;
+
+    // Get file size and calculate number of records
+    let metadata = file.metadata()?;
+    let data_size = metadata.len() as usize - HEADER_SIZE;
+    if data_size % RECORD_SIZE != 0 {
+        return Err(IbuError::InvalidMapSize);
+    }
+    let num_records = data_size / crate::RECORD_SIZE;
+
+    // Allocate Vec<Record> directly (proper alignment!)
+    let mut records = vec![Record::default(); num_records];
+
+    // Read directly into the record buffer
+    let buffer: &mut [u8] = bytemuck::cast_slice_mut(&mut records);
+    file.read_exact(buffer)?;
+
+    Ok(records)
+}

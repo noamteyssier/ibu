@@ -24,4 +24,10 @@ pub enum IbuError {
 
     #[error("Invalid UMI length: {0}")]
     InvalidUmiLength(u32),
+
+    #[error("Invalid map size - not a multiple of record size")]
+    InvalidMapSize,
+
+    #[error("Invalid index ({idx}) - Must be less than {max}")]
+    InvalidIndex { idx: usize, max: usize },
 }
