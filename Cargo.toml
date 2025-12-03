@@ -23,6 +23,3 @@ thiserror = "2.0.17"
 default = ["serde", "niffler"]
 serde = ["dep:serde"]
 niffler = ["dep:niffler"]
-
-[profile.release]
-debug = true
