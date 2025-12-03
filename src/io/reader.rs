@@ -108,7 +108,7 @@ impl<R: Read> Iterator for Reader<R> {
             }
         }
         if self.eof {
-            return None;
+            None
         } else {
             let lpos = RECORD_SIZE * self.pos;
             let rpos = lpos + RECORD_SIZE;
@@ -168,7 +168,7 @@ pub fn load_to_vec<P: AsRef<Path>>(path: P) -> crate::Result<Vec<Record>> {
     // Get file size and calculate number of records
     let metadata = file.metadata()?;
     let data_size = metadata.len() as usize - HEADER_SIZE;
-    if data_size % RECORD_SIZE != 0 {
+    if !data_size.is_multiple_of(RECORD_SIZE) {
         return Err(IbuError::InvalidMapSize);
     }
     let num_records = data_size / crate::RECORD_SIZE;

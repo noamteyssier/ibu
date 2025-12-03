@@ -12,6 +12,7 @@ pub struct MmapReader {
     /// Number of records in the map
     len: usize,
 }
+#[allow(clippy::len_without_is_empty)]
 impl MmapReader {
     pub fn new<P: AsRef<Path>>(path: P) -> crate::Result<Self> {
         let file = File::open(path)?;
