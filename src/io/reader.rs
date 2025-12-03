@@ -156,7 +156,7 @@ impl Reader<BoxedReader> {
     }
 }
 
-pub fn load_to_vec<P: AsRef<Path>>(path: P) -> crate::Result<Vec<Record>> {
+pub fn load_to_vec<P: AsRef<Path>>(path: P) -> crate::Result<(Header, Vec<Record>)> {
     let mut file = File::open(path)?;
 
     // Read and validate header
@@ -180,5 +180,5 @@ pub fn load_to_vec<P: AsRef<Path>>(path: P) -> crate::Result<Vec<Record>> {
     let buffer: &mut [u8] = bytemuck::cast_slice_mut(&mut records);
     file.read_exact(buffer)?;
 
-    Ok(records)
+    Ok((header, records))
 }
