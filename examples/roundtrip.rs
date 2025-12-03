@@ -2,11 +2,11 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::time::Instant;
 
-use ibu::{Header, Reader, Record, Writer};
+use ibu::{load_to_vec, Header, Reader, Record, Writer};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Configuration
-    let num_records = 100_000_000; // 100M records = ~2.4GB
+    let num_records = 500_000_000; // 100M records = ~2.4GB
     let filename = "test_roundtrip.ibu";
 
     println!("IBU Roundtrip Test");
@@ -117,6 +117,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     assert_eq!(records_read, num_records, "Record count mismatch!");
     println!("  ✓ Record count matches\n");
+
+    // ========== Direct Load ===========
+    let start = Instant::now();
+    let records = load_to_vec(filename)?;
+    let elapsed = start.elapsed();
+    let load_rate = records.len() as f64 / elapsed.as_secs_f64() / 1_000_000.0;
+    let load_bandwidth = (records.len() * 24) as f64 / elapsed.as_secs_f64() / 1_000_000_000.0;
+
+    println!("Direct Load:");
+    println!("  Duration: {:.2}s", elapsed.as_secs_f64());
+    println!("  Rate: {:.2} M records/s", load_rate);
+    println!("  Bandwidth: {:.2} GB/s\n", load_bandwidth);
 
     // ========== CLEANUP ==========
     std::fs::remove_file(filename)?;
