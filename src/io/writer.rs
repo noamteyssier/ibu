@@ -3,11 +3,12 @@
 //! This module provides high-performance writing capabilities for IBU files,
 //! with support for buffering, batch operations, and compression.
 
-use std::{fs::File, io::Write, path::Path};
+use std::{fs::File, io::Write, marker::PhantomData, path::Path};
 
-use crate::{Header, Record, RECORD_SIZE};
+use crate::{Header, IbuError, IbuRecord, Record};
 
-const DEFAULT_BUFFER_SIZE: usize = 48 * 1024 * RECORD_SIZE;
+/// Number of records held in the internal buffer before flushing.
+const DEFAULT_BUFFER_RECORDS: usize = 48 * 1024;
 pub type BoxedWriter = Box<dyn Write + Send>;
 
 /// High-performance writer for IBU files.
@@ -15,6 +16,11 @@ pub type BoxedWriter = Box<dyn Write + Send>;
 /// The `Writer` provides efficient writing of IBU records with automatic buffering
 /// and batch operations. It writes the header immediately upon construction and
 /// then buffers records to minimize system calls.
+///
+/// The writer is generic over the record type `T` (defaulting to [`Record`]), so the
+/// same code paths serve both classic 24-byte records and 64-byte [`ExtRecord`]s
+/// (`Writer<W, ExtRecord>`). The extended header flag is stamped automatically to
+/// match `T` on construction.
 ///
 /// # Buffering Strategy
 ///
@@ -80,7 +86,7 @@ pub type BoxedWriter = Box<dyn Write + Send>;
 /// # }
 /// ```
 #[derive(Clone)]
-pub struct Writer<W: Write> {
+pub struct Writer<W: Write, T: IbuRecord = Record> {
     /// Inner writer providing the data sink
     inner: W,
 
@@ -92,13 +98,19 @@ pub struct Writer<W: Write> {
 
     /// Number of records written so far
     records_written: u64,
+
+    /// Marker for the record type being written
+    _record: PhantomData<T>,
 }
 
-impl<W: Write> Writer<W> {
+impl<W: Write, T: IbuRecord> Writer<W, T> {
     /// Creates a new writer with the specified header.
     ///
     /// The header is written immediately to the underlying writer and validated.
     /// The writer is then ready to accept record data.
+    ///
+    /// The extended flag of the header is set automatically when `T` is an extended
+    /// record type, so callers never need to manage it by hand.
     ///
     /// # Arguments
     ///
@@ -108,7 +120,7 @@ impl<W: Write> Writer<W> {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The header validation fails
+    /// - The header has the extended flag set but `T` is not an extended record type
     /// - Writing the header to the sink fails
     ///
     /// # Examples
@@ -120,26 +132,28 @@ impl<W: Write> Writer<W> {
     /// # fn main() -> ibu::Result<()> {
     /// let header = Header::new(16, 12);
     /// let buffer = Vec::new();
-    /// let writer = Writer::new(buffer, header)?;
+    /// let writer: Writer<_, ibu::Record> = Writer::new(buffer, header)?;
     ///
     /// assert_eq!(writer.records_written(), 0);
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new(mut inner: W, header: Header) -> crate::Result<Self> {
+    pub fn new(mut inner: W, mut header: Header) -> crate::Result<Self> {
+        // Stamp the extended flag to match the record type
+        if T::EXTENDED {
+            header.set_extended();
+        } else if header.extended() {
+            return Err(IbuError::ExtendedRecordMismatch {
+                is_ext: true,
+                ext_expected: false,
+            });
+        }
+
         // Write header immediately
         let header_bytes: &[u8] = bytemuck::bytes_of(&header);
         inner.write_all(header_bytes)?;
 
-        // Initialize buffer
-        let buffer = vec![0u8; DEFAULT_BUFFER_SIZE];
-
-        Ok(Self {
-            inner,
-            buffer,
-            pos: 0,
-            records_written: 0,
-        })
+        Ok(Self::new_headless(inner))
     }
 
     /// Creates a new writer without writing a header.
@@ -168,13 +182,14 @@ impl<W: Write> Writer<W> {
     /// ```
     pub fn new_headless(inner: W) -> Self {
         // Initialize buffer
-        let buffer = vec![0u8; DEFAULT_BUFFER_SIZE];
+        let buffer = vec![0u8; DEFAULT_BUFFER_RECORDS * T::SIZE];
 
         Self {
             inner,
             buffer,
             pos: 0,
             records_written: 0,
+            _record: PhantomData,
         }
     }
 
@@ -257,16 +272,16 @@ impl<W: Write> Writer<W> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn write_record(&mut self, record: &Record) -> crate::Result<()> {
+    pub fn write_record(&mut self, record: &T) -> crate::Result<()> {
         // If buffer doesn't have space, flush it
-        if self.pos + RECORD_SIZE > self.buffer.len() {
+        if self.pos + T::SIZE > self.buffer.len() {
             self.flush_buffer()?;
         }
 
         // Write record to buffer
         let record_bytes: &[u8] = bytemuck::bytes_of(record);
-        self.buffer[self.pos..self.pos + RECORD_SIZE].copy_from_slice(record_bytes);
-        self.pos += RECORD_SIZE;
+        self.buffer[self.pos..self.pos + T::SIZE].copy_from_slice(record_bytes);
+        self.pos += T::SIZE;
         self.records_written += 1;
 
         Ok(())
@@ -312,14 +327,14 @@ impl<W: Write> Writer<W> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn write_batch(&mut self, records: &[Record]) -> crate::Result<()> {
+    pub fn write_batch(&mut self, records: &[T]) -> crate::Result<()> {
         // Convert records to bytes using bytemuck
         let records_bytes: &[u8] = bytemuck::cast_slice(records);
         self.write_slice(records_bytes)
     }
 
     fn write_slice(&mut self, buffer: &[u8]) -> crate::Result<()> {
-        let num_records = buffer.len() / RECORD_SIZE;
+        let num_records = buffer.len() / T::SIZE;
 
         // If the batch is larger than our buffer, write directly
         if buffer.len() > self.buffer.len() {
@@ -387,7 +402,7 @@ impl<W: Write> Writer<W> {
     /// ```
     pub fn write_iter<I>(&mut self, records: I) -> crate::Result<()>
     where
-        I: Iterator<Item = Record>,
+        I: Iterator<Item = T>,
     {
         for record in records {
             self.write_record(&record)?;
@@ -474,7 +489,7 @@ impl<W: Write> Writer<W> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn ingest(&mut self, other: &mut Writer<Vec<u8>>) -> crate::Result<()> {
+    pub fn ingest(&mut self, other: &mut Writer<Vec<u8>, T>) -> crate::Result<()> {
         other.flush_buffer()?;
         self.write_slice(&other.inner)?;
         other.inner.clear();
@@ -516,13 +531,13 @@ impl<W: Write> Writer<W> {
 /// This ensures that any buffered data is written even if `finish()` is not
 /// called explicitly. However, errors during the automatic flush are ignored,
 /// so explicit calls to `finish()` are recommended for proper error handling.
-impl<W: Write> Drop for Writer<W> {
+impl<W: Write, T: IbuRecord> Drop for Writer<W, T> {
     fn drop(&mut self) {
         self.finish().ok();
     }
 }
 
-impl Writer<BoxedWriter> {
+impl<T: IbuRecord> Writer<BoxedWriter, T> {
     /// Creates a writer that writes to a file at the specified path.
     ///
     /// The file is created (or truncated if it exists) and the header is
@@ -608,7 +623,8 @@ impl Writer<BoxedWriter> {
     ///
     /// // Command-line tool pattern
     /// let output_file: Option<String> = std::env::args().nth(2);
-    /// let mut writer = Writer::from_optional_path(output_file.as_deref(), header)?;
+    /// let mut writer: Writer<_, ibu::Record> =
+    ///     Writer::from_optional_path(output_file.as_deref(), header)?;
     ///
     /// // Write data...
     /// writer.finish()?;
@@ -636,7 +652,7 @@ mod tests {
     fn test_writer_creation() {
         let header = Header::new(16, 12);
         let buffer = Vec::new();
-        let writer = Writer::new(buffer, header).unwrap();
+        let writer: Writer<_, Record> = Writer::new(buffer, header).unwrap();
 
         assert_eq!(writer.records_written(), 0);
 
@@ -648,7 +664,7 @@ mod tests {
     #[test]
     fn test_writer_headless() {
         let buffer = Vec::new();
-        let writer = Writer::new_headless(buffer);
+        let writer: Writer<_, Record> = Writer::new_headless(buffer);
 
         assert_eq!(writer.records_written(), 0);
 
@@ -774,7 +790,7 @@ mod tests {
         let mut writer = Writer::new(buffer, header).unwrap();
 
         // Fill buffer to capacity
-        let records_to_fill = DEFAULT_BUFFER_SIZE / RECORD_SIZE;
+        let records_to_fill = DEFAULT_BUFFER_RECORDS;
         for i in 0..records_to_fill {
             writer.write_record(&Record::new(i as u64, 0, 0)).unwrap();
         }
@@ -876,10 +892,44 @@ mod tests {
     fn test_writer_clone() {
         let header = Header::new(16, 12);
         let buffer = Vec::new();
-        let writer = Writer::new(buffer, header).unwrap();
+        let writer: Writer<_, Record> = Writer::new(buffer, header).unwrap();
 
         // Test that writer can be cloned
         let writer_clone = writer.clone();
         assert_eq!(writer.records_written(), writer_clone.records_written());
+    }
+
+    #[test]
+    fn test_ext_writer_sets_extended_flag() {
+        use crate::ExtRecord;
+
+        let header = Header::new(16, 12);
+        let buffer = Vec::new();
+        let mut writer: Writer<_, ExtRecord> = Writer::new(buffer, header).unwrap();
+
+        let record = ExtRecord::from_sequence(1, 2, 3, b"ACGT").unwrap();
+        writer.write_record(&record).unwrap();
+        writer.finish().unwrap();
+
+        let buffer = writer.into_inner();
+        let written_header = Header::from_bytes(&buffer[..32]);
+        assert!(written_header.extended());
+        assert_eq!(buffer.len(), 32 + crate::EXT_RECORD_SIZE);
+    }
+
+    #[test]
+    fn test_plain_writer_rejects_extended_header() {
+        let mut header = Header::new(16, 12);
+        header.set_extended();
+
+        let buffer = Vec::new();
+        let result: crate::Result<Writer<_, Record>> = Writer::new(buffer, header);
+        assert!(matches!(
+            result,
+            Err(crate::IbuError::ExtendedRecordMismatch {
+                is_ext: true,
+                ext_expected: false
+            })
+        ));
     }
 }

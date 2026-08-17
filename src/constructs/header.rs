@@ -3,7 +3,25 @@ use bytemuck::{Pod, Zeroable};
 use crate::IbuError;
 
 pub const MAGIC: u32 = 0x21554249; // "IBU!"
-pub const VERSION: u32 = 2;
+
+/// Current format version, written on all new files.
+///
+/// Version history:
+/// - 1: initial format
+/// - 2: current header layout, classic 24-byte records only
+/// - 3: introduces the extended flag (bit 1) and 64-byte extended records
+pub const VERSION: u32 = 3;
+
+/// Minimum format version this library can read.
+///
+/// Version 2 files remain fully readable, but may only contain classic records:
+/// version 2 readers in the wild are unaware of the extended flag and would
+/// silently misparse 64-byte records, so extended files must be version 3+.
+pub const MIN_VERSION: u32 = 2;
+
+/// Minimum format version that supports extended records.
+const EXT_MIN_VERSION: u32 = 3;
+
 pub const HEADER_SIZE: usize = std::mem::size_of::<Header>();
 
 /// Records are sorted
@@ -23,10 +41,10 @@ const IS_EXTENDED: u64 = 1 << 1;
 /// | Offset | Size | Field         | Description                                    |
 /// |--------|------|---------------|------------------------------------------------|
 /// | 0      | 4    | magic         | Magic number: 0x21554249 ("IBU!")            |
-/// | 4      | 4    | version       | Format version (currently 2)                  |
+/// | 4      | 4    | version       | Format version (currently 3, reads 2+)        |
 /// | 8      | 4    | bc_len        | Barcode length in bases (1-32)                |
 /// | 12     | 4    | umi_len       | UMI length in bases (1-32)                    |
-/// | 16     | 8    | flags         | Bit flags (bit 0: sorted, others reserved)    |
+/// | 16     | 8    | flags         | Bit flags (bit 0: sorted, bit 1: extended)    |
 /// | 24     | 8    | reserved      | Reserved bytes for future extensions          |
 ///
 /// # Examples
@@ -48,13 +66,12 @@ const IS_EXTENDED: u64 = 1 << 1;
 /// header.validate().unwrap();
 /// ```
 #[derive(Copy, Clone, Pod, Zeroable, Debug, PartialEq, Eq, Hash)]
-#[cfg(feature = "serde")]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(C)]
 pub struct Header {
     /// Magic number for file type validation: 0x21554249 ("IBU!")
     pub magic: u32,
-    /// Format version (currently 2)
+    /// Format version (currently 3; version 2 files remain readable)
     pub version: u32,
     /// Barcode length in bases (1-32)
     pub bc_len: u32,
@@ -122,8 +139,14 @@ impl Header {
     }
 
     /// Marks the file as containing extended IBU records.
+    ///
+    /// Extended records were introduced in format version 3, so this also upgrades
+    /// the header's version if it is older (e.g. a version 2 header carried over
+    /// from an existing file). This guarantees extended files are never stamped
+    /// with a version that pre-extension readers would accept and then misparse.
     pub fn set_extended(&mut self) {
         self.flags |= IS_EXTENDED;
+        self.version = self.version.max(EXT_MIN_VERSION);
     }
 
     /// Returns whether the file is marked as containing sorted records.
@@ -156,7 +179,8 @@ impl Header {
     ///
     /// Checks that:
     /// - Magic number matches the expected value
-    /// - Version matches the current version
+    /// - Version is within the supported range (2-3); version 2 files may only
+    ///   contain classic records, as the extended flag was introduced in version 3
     /// - Barcode length is between 1 and 32
     /// - UMI length is between 1 and 32
     ///
@@ -164,7 +188,8 @@ impl Header {
     ///
     /// Returns an error if any validation check fails:
     /// - `InvalidMagicNumber` if the magic number is incorrect
-    /// - `InvalidVersion` if the version is unsupported
+    /// - `InvalidVersion` if the version is unsupported, or if the extended flag
+    ///   is set on a pre-extension version
     /// - `InvalidBarcodeLength` if barcode length is 0 or > 32
     /// - `InvalidUmiLength` if UMI length is 0 or > 32
     ///
@@ -192,9 +217,19 @@ impl Header {
                 actual: self.magic,
             });
         }
-        if self.version != VERSION {
+        if self.version < MIN_VERSION || self.version > VERSION {
             return Err(IbuError::InvalidVersion {
-                expected: VERSION,
+                min: MIN_VERSION,
+                max: VERSION,
+                actual: self.version,
+            });
+        }
+        // Extended records were introduced in version 3; a version 2 file claiming
+        // extended records is malformed (and would be misparsed by v2 readers).
+        if self.extended() && self.version < EXT_MIN_VERSION {
+            return Err(IbuError::InvalidVersion {
+                min: EXT_MIN_VERSION,
+                max: VERSION,
                 actual: self.version,
             });
         }
@@ -321,15 +356,70 @@ mod tests {
     #[test]
     fn test_validation_invalid_version() {
         let mut header = Header::new(16, 12);
-        header.version = 1;
 
+        // version 1 is below the supported range
+        header.version = 1;
         match header.validate() {
-            Err(IbuError::InvalidVersion { expected, actual }) => {
-                assert_eq!(expected, VERSION);
+            Err(IbuError::InvalidVersion { min, max, actual }) => {
+                assert_eq!(min, MIN_VERSION);
+                assert_eq!(max, VERSION);
                 assert_eq!(actual, 1);
             }
             other => panic!("Expected InvalidVersion, got: {:?}", other),
         }
+
+        // versions beyond the current one are rejected
+        header.version = VERSION + 1;
+        assert!(matches!(
+            header.validate(),
+            Err(IbuError::InvalidVersion { .. })
+        ));
+    }
+
+    #[test]
+    fn test_validation_version_2_classic_records() {
+        // version 2 files with classic records remain readable
+        let mut header = Header::new(16, 12);
+        header.version = 2;
+        assert!(header.validate().is_ok());
+
+        header.set_sorted();
+        assert!(header.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validation_version_2_extended_rejected() {
+        // a version 2 header claiming extended records is malformed
+        let mut header = Header::new(16, 12);
+        header.flags |= 1 << 1; // set extended flag without version upgrade
+        header.version = 2;
+
+        match header.validate() {
+            Err(IbuError::InvalidVersion { min, max, actual }) => {
+                assert_eq!(min, 3);
+                assert_eq!(max, VERSION);
+                assert_eq!(actual, 2);
+            }
+            other => panic!("Expected InvalidVersion, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_set_extended_upgrades_version() {
+        // a version 2 header (e.g. carried over from an old file) is upgraded
+        // to version 3 when marked as extended
+        let mut header = Header::new(16, 12);
+        header.version = 2;
+
+        header.set_extended();
+        assert!(header.extended());
+        assert_eq!(header.version, 3);
+        assert!(header.validate().is_ok());
+
+        // current-version headers are left as-is
+        let mut header = Header::new(16, 12);
+        header.set_extended();
+        assert_eq!(header.version, VERSION);
     }
 
     #[test]
@@ -402,7 +492,8 @@ mod tests {
 
     #[test]
     fn test_version_constant() {
-        assert_eq!(VERSION, 2);
+        assert_eq!(VERSION, 3);
+        assert_eq!(MIN_VERSION, 2);
     }
 
     #[test]

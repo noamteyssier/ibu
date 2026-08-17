@@ -6,12 +6,16 @@
 use std::{
     fs::File,
     io::{BufReader, Read},
+    marker::PhantomData,
     path::Path,
 };
 
-use crate::{Header, IbuError, Record, EXT_RECORD_SIZE, HEADER_SIZE, RECORD_SIZE};
+use crate::{
+    ExtRecord, Header, IbuError, IbuRecord, Record, EXT_RECORD_SIZE, HEADER_SIZE, RECORD_SIZE,
+};
 
-const DEFAULT_BUFFER_SIZE: usize = 48 * 1024 * RECORD_SIZE;
+/// Number of records held in the internal buffer per batch read.
+const DEFAULT_BUFFER_RECORDS: usize = 48 * 1024;
 type BoxedReader = Box<dyn Read + Send>;
 
 /// Streaming reader for IBU files.
@@ -98,6 +102,9 @@ pub struct Reader<R: Read> {
     /// Header from the IBU file
     header: Header,
 
+    /// Size in bytes of a single record, derived from the header's extended flag
+    record_size: usize,
+
     /// Current record position in the buffer (in records, not bytes)
     pos: usize,
 
@@ -136,7 +143,7 @@ impl<R: Read> Reader<R> {
     /// // Create valid IBU data
     /// let header = Header::new(16, 12);
     /// let buffer = Vec::new();
-    /// let mut writer = Writer::new(buffer, header)?;
+    /// let mut writer: Writer<_, ibu::Record> = Writer::new(buffer, header)?;
     /// writer.finish()?;
     ///
     /// // Create reader
@@ -160,14 +167,21 @@ impl<R: Read> Reader<R> {
             header
         };
 
+        let record_size = if header.extended() {
+            EXT_RECORD_SIZE
+        } else {
+            RECORD_SIZE
+        };
+
         // init buffer
-        let buffer = Vec::with_capacity(DEFAULT_BUFFER_SIZE);
+        let buffer = Vec::with_capacity(DEFAULT_BUFFER_RECORDS * record_size);
 
         // init struct
         Ok(Self {
             inner,
             buffer,
             header,
+            record_size,
             pos: 0,
             cap: 0,
             bytes_read: HEADER_SIZE,
@@ -202,7 +216,7 @@ impl<R: Read> Reader<R> {
     /// # fn main() -> ibu::Result<()> {
     /// let header = Header::new(16, 12);
     /// let buffer = Vec::new();
-    /// let mut writer = Writer::new(buffer, header)?;
+    /// let mut writer: Writer<_, ibu::Record> = Writer::new(buffer, header)?;
     /// writer.finish()?;
     ///
     /// let buffer = writer.into_inner();
@@ -230,20 +244,14 @@ impl<R: Read> Reader<R> {
             }
         }
 
-        let record_size = if self.header().extended() {
-            EXT_RECORD_SIZE
-        } else {
-            RECORD_SIZE
-        };
-
-        if read % record_size != 0 {
-            let non_rem = read - read % record_size;
+        if read % self.record_size != 0 {
+            let non_rem = read - read % self.record_size;
             return Err(IbuError::TruncatedRecord {
                 pos: self.bytes_read + non_rem,
             });
         }
         self.pos = 0;
-        self.cap = read / record_size;
+        self.cap = read / self.record_size;
         self.bytes_read += read;
         Ok(read > 0)
     }
@@ -264,7 +272,7 @@ impl<R: Read> Reader<R> {
     /// original_header.set_sorted();
     ///
     /// let buffer = Vec::new();
-    /// let mut writer = Writer::new(buffer, original_header)?;
+    /// let mut writer: Writer<_, ibu::Record> = Writer::new(buffer, original_header)?;
     /// writer.finish()?;
     ///
     /// let buffer = writer.into_inner();
@@ -282,29 +290,60 @@ impl<R: Read> Reader<R> {
         self.header
     }
 
-    /// Iterate Records
-    pub fn iter_records(self) -> Result<RecordIter<R>, IbuError> {
-        if !self.header().extended() {
-            Ok(RecordIter { inner: self })
+    /// Iterate over records of an arbitrary [`IbuRecord`] type.
+    ///
+    /// The requested record type must match the file's extended flag; use
+    /// [`Reader::iter_records`] and [`Reader::iter_ext_records`] as convenience
+    /// shorthands for the two concrete record types.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IbuError::ExtendedRecordMismatch`] if the file's extended flag
+    /// does not match the requested record type.
+    pub fn records<T: IbuRecord>(self) -> Result<RecordIter<R, T>, IbuError> {
+        if self.header().extended() == T::EXTENDED {
+            Ok(RecordIter {
+                inner: self,
+                _record: PhantomData,
+            })
         } else {
             Err(IbuError::ExtendedRecordMismatch {
-                is_ext: false,
-                ext_expected: true,
+                is_ext: self.header().extended(),
+                ext_expected: T::EXTENDED,
             })
         }
     }
+
+    /// Iterate over classic 24-byte [`Record`]s.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IbuError::ExtendedRecordMismatch`] if the file contains extended records.
+    pub fn iter_records(self) -> Result<RecordIter<R, Record>, IbuError> {
+        self.records::<Record>()
+    }
+
+    /// Iterate over extended 64-byte [`ExtRecord`]s.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IbuError::ExtendedRecordMismatch`] if the file contains classic records.
+    pub fn iter_ext_records(self) -> Result<RecordIter<R, ExtRecord>, IbuError> {
+        self.records::<ExtRecord>()
+    }
 }
 
-pub struct RecordIter<R: Read> {
+pub struct RecordIter<R: Read, T: IbuRecord = Record> {
     inner: Reader<R>,
+    _record: PhantomData<T>,
 }
-impl<R: Read> RecordIter<R> {
+impl<R: Read, T: IbuRecord> RecordIter<R, T> {
     pub fn bytes_read(&self) -> usize {
         self.inner.bytes_read
     }
 }
-impl<R: Read> Iterator for RecordIter<R> {
-    type Item = Result<Record, IbuError>;
+impl<R: Read, T: IbuRecord> Iterator for RecordIter<R, T> {
+    type Item = Result<T, IbuError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.inner.eof {
@@ -323,11 +362,11 @@ impl<R: Read> Iterator for RecordIter<R> {
         if self.inner.eof {
             None
         } else {
-            let lpos = RECORD_SIZE * self.inner.pos;
-            let rpos = lpos + RECORD_SIZE;
-            let record: &[Record] = bytemuck::cast_slice(&self.inner.buffer[lpos..rpos]);
+            let lpos = T::SIZE * self.inner.pos;
+            let rpos = lpos + T::SIZE;
+            let record: T = bytemuck::pod_read_unaligned(&self.inner.buffer[lpos..rpos]);
             self.inner.pos += 1;
-            Some(Ok(record[0]))
+            Some(Ok(record))
         }
     }
 }
@@ -493,25 +532,27 @@ impl Reader<BoxedReader> {
 ///
 /// # Returns
 ///
-/// Returns a tuple of `(Header, Vec<Record>)` containing the file header
-/// and all records.
+/// Returns a tuple of `(Header, Vec<T>)` containing the file header
+/// and all records. `T` may be any [`IbuRecord`] type (e.g. [`Record`] or
+/// [`ExtRecord`]) and must match the file's extended flag.
 ///
 /// # Errors
 ///
 /// Returns an error if:
 /// - The file cannot be opened or read
 /// - The header is invalid
+/// - The file's extended flag does not match the requested record type
 /// - The file size is not consistent with the record format
 /// - Not enough memory is available
 ///
 /// # Examples
 ///
 /// ```rust,no_run
-/// use ibu::load_to_vec;
+/// use ibu::{load_to_vec, Record};
 ///
 /// # fn main() -> ibu::Result<()> {
 /// // Load entire file into memory
-/// let (header, records) = load_to_vec("large_dataset.ibu")?;
+/// let (header, records): (_, Vec<Record>) = load_to_vec("large_dataset.ibu")?;
 ///
 /// println!("Loaded {} records", records.len());
 /// println!("Barcode length: {}", header.bc_len);
@@ -534,7 +575,7 @@ impl Reader<BoxedReader> {
 /// - 1M records: ~23MB
 /// - 10M records: ~229MB
 /// - 100M records: ~2.2GB
-pub fn load_to_vec<P: AsRef<Path>>(path: P) -> crate::Result<(Header, Vec<Record>)> {
+pub fn load_to_vec<P: AsRef<Path>, T: IbuRecord>(path: P) -> crate::Result<(Header, Vec<T>)> {
     let mut file = File::open(path)?;
 
     // Read and validate header
@@ -542,17 +583,23 @@ pub fn load_to_vec<P: AsRef<Path>>(path: P) -> crate::Result<(Header, Vec<Record
     file.read_exact(&mut header_bytes)?;
     let header = crate::Header::from_bytes(&header_bytes);
     header.validate()?;
+    if header.extended() != T::EXTENDED {
+        return Err(IbuError::ExtendedRecordMismatch {
+            is_ext: header.extended(),
+            ext_expected: T::EXTENDED,
+        });
+    }
 
     // Get file size and calculate number of records
     let metadata = file.metadata()?;
     let data_size = metadata.len() as usize - HEADER_SIZE;
-    if !data_size.is_multiple_of(RECORD_SIZE) {
+    if !data_size.is_multiple_of(T::SIZE) {
         return Err(IbuError::InvalidMapSize);
     }
-    let num_records = data_size / crate::RECORD_SIZE;
+    let num_records = data_size / T::SIZE;
 
-    // Allocate Vec<Record> directly (proper alignment!)
-    let mut records = vec![Record::default(); num_records];
+    // Allocate Vec<T> directly (proper alignment!)
+    let mut records = vec![T::zeroed(); num_records];
 
     // Read directly into the record buffer
     let buffer: &mut [u8] = bytemuck::cast_slice_mut(&mut records);
@@ -722,7 +769,7 @@ mod tests {
         }
 
         // Load with load_to_vec
-        let (header, loaded_records) = load_to_vec(temp_path).unwrap();
+        let (header, loaded_records): (Header, Vec<Record>) = load_to_vec(temp_path).unwrap();
 
         assert_eq!(header.bc_len, 16);
         assert_eq!(header.umi_len, 12);
@@ -746,7 +793,7 @@ mod tests {
             file.write_all(&buffer).unwrap();
         }
 
-        let (header, loaded_records) = load_to_vec(temp_path).unwrap();
+        let (header, loaded_records): (Header, Vec<Record>) = load_to_vec(temp_path).unwrap();
 
         assert_eq!(header.bc_len, 16);
         assert_eq!(header.umi_len, 12);
@@ -770,7 +817,7 @@ mod tests {
             file.write_all(&buffer).unwrap();
         }
 
-        let result = load_to_vec(temp_path);
+        let result: crate::Result<(Header, Vec<Record>)> = load_to_vec(temp_path);
         assert!(matches!(result, Err(IbuError::InvalidMapSize)));
 
         fs::remove_file(temp_path).unwrap();
@@ -800,5 +847,152 @@ mod tests {
 
         // Note: reader is moved by collect(), so we can't access it anymore
         // But we know it should have read the entire buffer
+    }
+
+    fn create_ext_test_data(records: &[ExtRecord]) -> Vec<u8> {
+        let header = Header::new(16, 12);
+        let buffer = Vec::new();
+        let mut writer: crate::Writer<_, ExtRecord> = crate::Writer::new(buffer, header).unwrap();
+        writer.write_batch(records).unwrap();
+        writer.finish().unwrap();
+        writer.into_inner()
+    }
+
+    #[test]
+    fn test_ext_reader_roundtrip() {
+        let records = vec![
+            ExtRecord::from_sequence(1, 2, 3, b"ACGTACGT").unwrap(),
+            ExtRecord::from_sequence(4, 5, 6, b"TTGGCCAATTGGCCAA").unwrap(),
+            ExtRecord::from_sequence(7, 8, 9, b"").unwrap(),
+        ];
+        let buffer = create_ext_test_data(&records);
+        let cursor = Cursor::new(buffer);
+
+        let reader = Reader::new(cursor).unwrap();
+        assert!(reader.header().extended());
+
+        let read_records: Vec<ExtRecord> = reader
+            .iter_ext_records()
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(records, read_records);
+
+        let buf = read_records[0].decode_sequence().unwrap();
+        assert_eq!(buf.seq(), b"ACGTACGT");
+    }
+
+    #[test]
+    fn test_ext_reader_large_batch() {
+        let records: Vec<ExtRecord> = (0..100_000)
+            .map(|i| ExtRecord::from_sequence(i, i * 2, i * 3, b"ACGTACGTACGT").unwrap())
+            .collect();
+        let buffer = create_ext_test_data(&records);
+        let cursor = Cursor::new(buffer);
+
+        let reader = Reader::new(cursor).unwrap();
+        let read_records: Vec<ExtRecord> = reader
+            .iter_ext_records()
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(records, read_records);
+    }
+
+    #[test]
+    fn test_reads_version_2_files() {
+        // Simulate a legacy file written by ibu 0.2.x: classic records, version 2
+        let records = vec![Record::new(1, 2, 3), Record::new(4, 5, 6)];
+        let mut buffer = create_test_data(&records);
+        buffer[4..8].copy_from_slice(&2u32.to_le_bytes());
+
+        let reader = Reader::new(Cursor::new(buffer)).unwrap();
+        assert_eq!(reader.header().version, 2);
+        assert!(!reader.header().extended());
+
+        let read_records: Vec<Record> = reader
+            .iter_records()
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(records, read_records);
+    }
+
+    #[test]
+    fn test_rejects_version_2_extended_files() {
+        // A version 2 file claiming extended records is malformed: v2 readers
+        // in the wild would misparse it, so it must be rejected outright
+        let records = vec![ExtRecord::from_sequence(1, 2, 3, b"ACGT").unwrap()];
+        let mut buffer = create_ext_test_data(&records);
+        buffer[4..8].copy_from_slice(&2u32.to_le_bytes());
+
+        let result = Reader::new(Cursor::new(buffer));
+        assert!(matches!(
+            result,
+            Err(IbuError::InvalidVersion {
+                min: 3,
+                max: crate::VERSION,
+                actual: 2
+            })
+        ));
+    }
+
+    #[test]
+    fn test_record_type_mismatch() {
+        // plain file, extended iterator requested
+        let buffer = create_test_data(&[Record::new(1, 2, 3)]);
+        let reader = Reader::new(Cursor::new(buffer)).unwrap();
+        assert!(matches!(
+            reader.iter_ext_records(),
+            Err(IbuError::ExtendedRecordMismatch {
+                is_ext: false,
+                ext_expected: true
+            })
+        ));
+
+        // extended file, plain iterator requested
+        let buffer = create_ext_test_data(&[ExtRecord::from_sequence(1, 2, 3, b"ACGT").unwrap()]);
+        let reader = Reader::new(Cursor::new(buffer)).unwrap();
+        assert!(matches!(
+            reader.iter_records(),
+            Err(IbuError::ExtendedRecordMismatch {
+                is_ext: true,
+                ext_expected: false
+            })
+        ));
+    }
+
+    #[test]
+    fn test_ext_load_to_vec() {
+        use std::fs;
+        use std::io::Write;
+
+        let records = vec![
+            ExtRecord::from_sequence(1, 2, 3, b"ACGT").unwrap(),
+            ExtRecord::from_sequence(4, 5, 6, b"TTGGCC").unwrap(),
+        ];
+
+        let temp_path = "test_ext_load_to_vec.ibu";
+        let buffer = create_ext_test_data(&records);
+        {
+            let mut file = fs::File::create(temp_path).unwrap();
+            file.write_all(&buffer).unwrap();
+        }
+
+        // Correct type loads fine
+        let (header, loaded): (Header, Vec<ExtRecord>) = load_to_vec(temp_path).unwrap();
+        assert!(header.extended());
+        assert_eq!(loaded, records);
+
+        // Wrong record type errors
+        let result: crate::Result<(Header, Vec<Record>)> = load_to_vec(temp_path);
+        assert!(matches!(
+            result,
+            Err(IbuError::ExtendedRecordMismatch { .. })
+        ));
+
+        fs::remove_file(temp_path).unwrap();
     }
 }
