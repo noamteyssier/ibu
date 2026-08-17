@@ -19,7 +19,7 @@
 //! - The `on_batch_complete` callback allows efficient aggregation of results
 //! - Memory-mapped files enable zero-copy access to records across threads
 
-use crate::{Record, Result};
+use crate::{IbuRecord, Record, Result};
 
 /// Trait for types that can process records in parallel.
 ///
@@ -97,7 +97,7 @@ use crate::{Record, Result};
 ///     }
 /// }
 /// ```
-pub trait ParallelProcessor: Send + Clone {
+pub trait ParallelProcessor<T: IbuRecord = Record>: Send + Clone {
     /// Processes a single record.
     ///
     /// This method is called for every record in the dataset. It should be efficient
@@ -114,7 +114,7 @@ pub trait ParallelProcessor: Send + Clone {
     ///
     /// Should return an error if processing fails. This will stop the entire
     /// parallel processing operation.
-    fn process_record(&mut self, record: Record) -> Result<()>;
+    fn process_record(&mut self, record: T) -> Result<()>;
 
     /// Called when a thread finishes processing a batch of records.
     ///
@@ -247,7 +247,7 @@ pub trait ParallelProcessor: Send + Clone {
 /// # Ok(())
 /// # }
 /// ```
-pub trait ParallelReader {
+pub trait ParallelReader<T: IbuRecord = Record> {
     /// Processes all records in parallel using the specified processor.
     ///
     /// Divides the records across the specified number of threads and processes
@@ -288,7 +288,7 @@ pub trait ParallelReader {
     /// # Ok(())
     /// # }
     /// ```
-    fn process_parallel<P: ParallelProcessor + Clone + 'static>(
+    fn process_parallel<P: ParallelProcessor<T> + Clone + 'static>(
         &self,
         processor: P,
         num_threads: usize,

@@ -1,5 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 
+use crate::IbuRecord;
+
 pub const RECORD_SIZE: usize = std::mem::size_of::<Record>();
 
 /// Binary format record for IBU files.
@@ -56,8 +58,7 @@ pub const RECORD_SIZE: usize = std::mem::size_of::<Record>();
 /// assert_eq!(record, reconstructed);
 /// ```
 #[derive(Copy, Clone, Pod, Zeroable, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-#[cfg(feature = "serde")]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(C)]
 pub struct Record {
     pub barcode: u64,
@@ -129,6 +130,25 @@ impl Record {
     /// ```
     pub fn from_bytes(bytes: &[u8]) -> Self {
         *bytemuck::from_bytes(bytes)
+    }
+}
+
+impl IbuRecord for Record {
+    const EXTENDED: bool = false;
+
+    #[inline(always)]
+    fn barcode(&self) -> u64 {
+        self.barcode
+    }
+
+    #[inline(always)]
+    fn umi(&self) -> u64 {
+        self.umi
+    }
+
+    #[inline(always)]
+    fn index(&self) -> u64 {
+        self.index
     }
 }
 

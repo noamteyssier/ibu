@@ -66,6 +66,7 @@ pub enum IbuError {
     ///
     /// This occurs when there are problems with compressed file formats
     /// like gzip or zstd when the `niffler` feature is enabled.
+    #[cfg(feature = "niffler")]
     #[error("Niffler error")]
     Niffler(#[from] niffler::Error),
 
@@ -86,9 +87,12 @@ pub enum IbuError {
     /// Unsupported file format version.
     ///
     /// The file was created with a different version of the IBU format
-    /// that is not supported by this library version.
-    #[error("Invalid version found, expected ({expected}), found ({actual})")]
-    InvalidVersion { expected: u32, actual: u32 },
+    /// that is not supported by this library version. Note that the
+    /// supported range depends on the record type: classic records are
+    /// readable from version 2 onwards, while extended records require
+    /// version 3.
+    #[error("Invalid version: found ({actual}), supported versions ({min}-{max})")]
+    InvalidVersion { min: u32, max: u32, actual: u32 },
 
     /// Barcode length is outside the valid range (1-32).
     ///
@@ -117,6 +121,14 @@ pub enum IbuError {
     /// or with invalid slice bounds in memory-mapped operations.
     #[error("Invalid index ({idx}) - Must be less than {max}")]
     InvalidIndex { idx: usize, max: usize },
+
+    /// Mismatch in expected record type
+    #[error("Invalid record type: expected extended ({ext_expected}) but is extended ({is_ext})")]
+    ExtendedRecordMismatch { is_ext: bool, ext_expected: bool },
+
+    /// Sequence is too long to fit in an extended record's packed buffer.
+    #[error("Invalid sequence length: {len} (must be <= {max})")]
+    InvalidSequenceLength { len: usize, max: usize },
 
     /// Error occurred during parallel processing.
     ///
@@ -205,11 +217,12 @@ mod tests {
 
         // Test InvalidVersion
         let err = IbuError::InvalidVersion {
-            expected: 2,
+            min: 2,
+            max: 3,
             actual: 1,
         };
         let display = format!("{}", err);
-        assert!(display.contains("expected (2)"));
+        assert!(display.contains("supported versions (2-3)"));
         assert!(display.contains("found (1)"));
 
         // Test TruncatedRecord

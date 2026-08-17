@@ -9,21 +9,34 @@
 //!
 //! ## Format Specification
 //!
-//! The binary format consists of a 32-byte header followed by a collection of 24-byte records:
+//! The binary format consists of a 32-byte header followed by a collection of fixed-size
+//! records. A file contains either classic 24-byte records or extended 64-byte records,
+//! discriminated by the header's extended flag:
 //!
 //! ### Header (32 bytes)
 //! - Magic number: `0x21554249` ("IBU!")
-//! - Version: Format version (currently 2)
+//! - Version: Format version (currently 3; version 2 files with classic records
+//!   remain readable, while extended records require version 3)
 //! - Barcode length: Length in bases (max 32)
 //! - UMI length: Length in bases (max 32)
-//! - Flags: Bit flags (bit 0 = sorted)
-//! - Record count: Total records (0 if unknown)
+//! - Flags: Bit flags (bit 0 = sorted, bit 1 = extended records)
 //! - Reserved: 8 bytes for future use
 //!
 //! ### Record (24 bytes)
 //! - Barcode: `u64` with 2-bit encoding
 //! - UMI: `u64` with 2-bit encoding
 //! - Index: `u64` application-specific value
+//!
+//! ### ExtRecord (64 bytes)
+//! - Barcode: `u64` with 2-bit encoding
+//! - UMI: `u64` with 2-bit encoding
+//! - Index: `u64` application-specific value
+//! - Sequence length: `u64` number of bases (max 128)
+//! - Sequence: 32 bytes of 2-bit packed nucleotides (max 128bp; fixed size)
+//!
+//! All record types implement the [`IbuRecord`] trait, so readers, writers, and
+//! downstream tooling (sorting, deduplication, parallel processing) can be written
+//! once, generic over the record type.
 //!
 //! ## Basic Usage
 //!
@@ -65,7 +78,7 @@
 //!
 //! // Read the records
 //! let mut read_records = Vec::new();
-//! for record in reader {
+//! for record in reader.iter_records()? {
 //!     read_records.push(record?);
 //! }
 //! assert_eq!(records, read_records);
@@ -81,7 +94,7 @@
 //! # fn main() -> ibu::Result<()> {
 //! // Read from file (automatically decompresses)
 //! let reader = Reader::from_path("data.ibu.gz")?;
-//! let read_records: Result<Vec<_>, _> = reader.collect();
+//! let read_records: Result<Vec<_>, _> = reader.iter_records()?.collect();
 //! let read_records = read_records?;
 //! # Ok(())
 //! # }
@@ -92,11 +105,11 @@
 //! ### Fast Bulk Loading
 //!
 //! ```rust,no_run
-//! use ibu::load_to_vec;
+//! use ibu::{load_to_vec, Record};
 //!
 //! # fn main() -> ibu::Result<()> {
 //! // Load entire file directly into memory
-//! let (header, records) = load_to_vec("data.ibu")?;
+//! let (header, records): (_, Vec<Record>) = load_to_vec("data.ibu")?;
 //! println!("Loaded {} records", records.len());
 //! # Ok(())
 //! # }
@@ -175,7 +188,10 @@ mod error;
 mod io;
 mod parallel;
 
-pub use constructs::{Header, Record, HEADER_SIZE, MAGIC, RECORD_SIZE, VERSION};
+pub use constructs::{
+    ExtRecord, ExtRecordBuffer, Header, IbuRecord, Record, EXT_RECORD_SIZE, HEADER_SIZE, MAGIC,
+    MIN_VERSION, RECORD_SIZE, VERSION,
+};
 pub use error::{IbuError, IntoIbuError, Result};
 pub use io::{load_to_vec, MmapReader, Reader, Writer};
 pub use parallel::{ParallelProcessor, ParallelReader};
