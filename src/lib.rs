@@ -201,6 +201,8 @@
 mod constructs;
 mod dedup;
 mod error;
+#[cfg(feature = "ext-sort")]
+mod external_chunk;
 mod io;
 mod parallel;
 
@@ -211,5 +213,11 @@ pub use constructs::{
 };
 pub use dedup::{dedup_sorted, DedupExt, DedupResults, DedupSorted};
 pub use error::{IbuError, IntoIbuError, Result};
+#[cfg(feature = "ext-sort")]
+pub use external_chunk::IbuExternalChunk;
 pub use io::{load_to_vec, MmapReader, Reader, Writer};
 pub use parallel::{ParallelProcessor, ParallelReader};
+
+/// Re-export ext-sort for versioning compatibility
+#[cfg(feature = "ext-sort")]
+pub use ext_sort;
