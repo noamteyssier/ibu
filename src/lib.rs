@@ -65,7 +65,7 @@
 //!
 //! // Read the records
 //! let mut read_records = Vec::new();
-//! for record in reader {
+//! for record in reader.iter_records()? {
 //!     read_records.push(record?);
 //! }
 //! assert_eq!(records, read_records);
@@ -81,7 +81,7 @@
 //! # fn main() -> ibu::Result<()> {
 //! // Read from file (automatically decompresses)
 //! let reader = Reader::from_path("data.ibu.gz")?;
-//! let read_records: Result<Vec<_>, _> = reader.collect();
+//! let read_records: Result<Vec<_>, _> = reader.iter_records()?.collect();
 //! let read_records = read_records?;
 //! # Ok(())
 //! # }
@@ -175,7 +175,9 @@ mod error;
 mod io;
 mod parallel;
 
-pub use constructs::{Header, Record, HEADER_SIZE, MAGIC, RECORD_SIZE, VERSION};
+pub use constructs::{
+    ExtRecord, Header, Record, EXT_RECORD_SIZE, HEADER_SIZE, MAGIC, RECORD_SIZE, VERSION,
+};
 pub use error::{IbuError, IntoIbuError, Result};
 pub use io::{load_to_vec, MmapReader, Reader, Writer};
 pub use parallel::{ParallelProcessor, ParallelReader};

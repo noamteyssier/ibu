@@ -9,7 +9,7 @@ use std::{
     path::Path,
 };
 
-use crate::{Header, IbuError, Record, HEADER_SIZE, RECORD_SIZE};
+use crate::{Header, IbuError, Record, EXT_RECORD_SIZE, HEADER_SIZE, RECORD_SIZE};
 
 const DEFAULT_BUFFER_SIZE: usize = 48 * 1024 * RECORD_SIZE;
 type BoxedReader = Box<dyn Read + Send>;
@@ -59,7 +59,7 @@ type BoxedReader = Box<dyn Read + Send>;
 /// println!("Barcode length: {}", header.bc_len);
 ///
 /// // Stream records
-/// for result in reader {
+/// for result in reader.iter_records()? {
 ///     let record = result?;
 ///     println!("Record: {:?}", record);
 /// }
@@ -229,14 +229,21 @@ impl<R: Read> Reader<R> {
                 Err(e) => return Err(e.into()),
             }
         }
-        if read % RECORD_SIZE != 0 {
-            let non_rem = read - read % RECORD_SIZE;
+
+        let record_size = if self.header().extended() {
+            EXT_RECORD_SIZE
+        } else {
+            RECORD_SIZE
+        };
+
+        if read % record_size != 0 {
+            let non_rem = read - read % record_size;
             return Err(IbuError::TruncatedRecord {
                 pos: self.bytes_read + non_rem,
             });
         }
         self.pos = 0;
-        self.cap = read / RECORD_SIZE;
+        self.cap = read / record_size;
         self.bytes_read += read;
         Ok(read > 0)
     }
@@ -274,32 +281,52 @@ impl<R: Read> Reader<R> {
     pub fn header(&self) -> Header {
         self.header
     }
+
+    /// Iterate Records
+    pub fn iter_records(self) -> Result<RecordIter<R>, IbuError> {
+        if !self.header().extended() {
+            Ok(RecordIter { inner: self })
+        } else {
+            Err(IbuError::ExtendedRecordMismatch {
+                is_ext: false,
+                ext_expected: true,
+            })
+        }
+    }
 }
 
-impl<R: Read> Iterator for Reader<R> {
+pub struct RecordIter<R: Read> {
+    inner: Reader<R>,
+}
+impl<R: Read> RecordIter<R> {
+    pub fn bytes_read(&self) -> usize {
+        self.inner.bytes_read
+    }
+}
+impl<R: Read> Iterator for RecordIter<R> {
     type Item = Result<Record, IbuError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.eof {
+        if self.inner.eof {
             return None;
         }
 
-        if self.pos >= self.cap {
-            match self.read_batch() {
+        if self.inner.pos >= self.inner.cap {
+            match self.inner.read_batch() {
                 Ok(true) => {}
                 Ok(false) => {
-                    self.eof = true;
+                    self.inner.eof = true;
                 }
                 Err(e) => return Some(Err(e)),
             }
         }
-        if self.eof {
+        if self.inner.eof {
             None
         } else {
-            let lpos = RECORD_SIZE * self.pos;
+            let lpos = RECORD_SIZE * self.inner.pos;
             let rpos = lpos + RECORD_SIZE;
-            let record: &[Record] = bytemuck::cast_slice(&self.buffer[lpos..rpos]);
-            self.pos += 1;
+            let record: &[Record] = bytemuck::cast_slice(&self.inner.buffer[lpos..rpos]);
+            self.inner.pos += 1;
             Some(Ok(record[0]))
         }
     }
@@ -335,7 +362,7 @@ impl Reader<BoxedReader> {
     /// let reader = Reader::from_path("data.ibu.gz")?;
     ///
     /// // Process records
-    /// for result in reader {
+    /// for result in reader.iter_records()? {
     ///     let record = result?;
     ///     println!("Barcode: {:#x}", record.barcode);
     /// }
@@ -378,7 +405,7 @@ impl Reader<BoxedReader> {
     /// let reader = Reader::from_stdin()?;
     ///
     /// let mut count = 0;
-    /// for result in reader {
+    /// for result in reader.iter_records()? {
     ///     let _record = result?;
     ///     count += 1;
     /// }
@@ -419,7 +446,7 @@ impl Reader<BoxedReader> {
     /// let input_file: Option<String> = std::env::args().nth(1);
     /// let reader = Reader::from_optional_path(input_file.as_deref())?;
     ///
-    /// for result in reader {
+    /// for result in reader.iter_records()? {
     ///     let record = result?;
     ///     // Process record...
     /// }
@@ -585,7 +612,7 @@ mod tests {
         let cursor = Cursor::new(buffer);
 
         let reader = Reader::new(cursor).unwrap();
-        let read_records: Result<Vec<_>, _> = reader.collect();
+        let read_records: Result<Vec<_>, _> = reader.iter_records().unwrap().collect();
         let read_records = read_records.unwrap();
 
         assert_eq!(records, read_records);
@@ -598,7 +625,11 @@ mod tests {
         let cursor = Cursor::new(buffer);
 
         let reader = Reader::new(cursor).unwrap();
-        let read_records: Vec<_> = reader.collect::<Result<Vec<_>, _>>().unwrap();
+        let read_records: Vec<_> = reader
+            .iter_records()
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
 
         assert_eq!(read_records.len(), 0);
     }
@@ -610,7 +641,11 @@ mod tests {
         let cursor = Cursor::new(buffer);
 
         let reader = Reader::new(cursor).unwrap();
-        let read_records: Vec<_> = reader.collect::<Result<Vec<_>, _>>().unwrap();
+        let read_records: Vec<_> = reader
+            .iter_records()
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
 
         assert_eq!(records, read_records);
     }
@@ -624,10 +659,11 @@ mod tests {
         buffer.truncate(buffer.len() - 5);
 
         let cursor = Cursor::new(buffer);
-        let mut reader = Reader::new(cursor).unwrap();
+        let reader = Reader::new(cursor).unwrap();
+        let mut iter = reader.iter_records().unwrap();
 
         // Should get truncated record error
-        let result = reader.next();
+        let result = iter.next();
         assert!(result.is_some());
         assert!(matches!(
             result.unwrap(),
@@ -747,19 +783,20 @@ mod tests {
 
         let cursor = Cursor::new(buffer);
 
-        let mut reader = Reader::new(cursor).unwrap();
+        let reader = Reader::new(cursor).unwrap();
+        let mut iter = reader.iter_records().unwrap();
 
         // Should have read the header (32 bytes)
-        assert_eq!(reader.bytes_read, HEADER_SIZE);
+        assert_eq!(iter.bytes_read(), HEADER_SIZE);
 
         // Read first record
-        let _ = reader.next().unwrap().unwrap();
+        let _ = iter.next().unwrap().unwrap();
 
         // Should have read more data now
-        assert!(reader.bytes_read > HEADER_SIZE);
+        assert!(iter.bytes_read() > HEADER_SIZE);
 
         // Read remaining records
-        let _: Vec<_> = reader.collect::<Result<Vec<_>, _>>().unwrap();
+        let _: Vec<_> = iter.collect::<Result<Vec<_>, _>>().unwrap();
 
         // Note: reader is moved by collect(), so we can't access it anymore
         // But we know it should have read the entire buffer

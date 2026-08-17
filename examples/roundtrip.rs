@@ -77,7 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(read_header.umi_len, header.umi_len);
         assert_eq!(read_header.sorted(), header.sorted());
 
-        for result in reader {
+        for result in reader.iter_records()? {
             let record = result?;
             records_read += 1;
 

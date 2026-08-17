@@ -6,6 +6,12 @@ pub const MAGIC: u32 = 0x21554249; // "IBU!"
 pub const VERSION: u32 = 2;
 pub const HEADER_SIZE: usize = std::mem::size_of::<Header>();
 
+/// Records are sorted
+const IS_SORTED: u64 = 1 << 0;
+
+/// Records are extended
+const IS_EXTENDED: u64 = 1 << 1;
+
 /// Binary format header for IBU files.
 ///
 /// The header is exactly 32 bytes in size, making it cache-line friendly on most
@@ -54,7 +60,10 @@ pub struct Header {
     pub bc_len: u32,
     /// UMI length in bases (1-32)
     pub umi_len: u32,
-    /// Bit flags: bit 0 = sorted, others reserved for future use
+    /// Bit flags:
+    ///
+    /// bit 0 = sorted, others reserved for future use
+    /// bit 1 = extended, others reserved for future use
     pub flags: u64,
     /// Reserved bytes for future extensions
     pub reserved: [u8; 8],
@@ -109,7 +118,12 @@ impl Header {
     /// assert!(header.sorted());
     /// ```
     pub fn set_sorted(&mut self) {
-        self.flags |= 1;
+        self.flags |= IS_SORTED;
+    }
+
+    /// Marks the file as containing extended IBU records.
+    pub fn set_extended(&mut self) {
+        self.flags |= IS_EXTENDED;
     }
 
     /// Returns whether the file is marked as containing sorted records.
@@ -127,8 +141,15 @@ impl Header {
     /// header.set_sorted();
     /// assert!(header.sorted());
     /// ```
+    #[inline(always)]
     pub fn sorted(&self) -> bool {
-        self.flags & 1 != 0
+        self.flags & IS_SORTED != 0
+    }
+
+    /// Returns whether the file contains extended IBU records
+    #[inline(always)]
+    pub fn extended(&self) -> bool {
+        self.flags & IS_EXTENDED != 0
     }
 
     /// Validates the header fields.
@@ -200,6 +221,7 @@ impl Header {
     /// let bytes = header.as_bytes();
     /// assert_eq!(bytes.len(), 32); // HEADER_SIZE
     /// ```
+    #[inline(always)]
     pub fn as_bytes(&self) -> &[u8] {
         bytemuck::bytes_of(self)
     }
@@ -223,6 +245,7 @@ impl Header {
     /// let reconstructed = Header::from_bytes(bytes);
     /// assert_eq!(original, reconstructed);
     /// ```
+    #[inline(always)]
     pub fn from_bytes(bytes: &[u8]) -> Self {
         *bytemuck::from_bytes(bytes)
     }

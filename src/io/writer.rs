@@ -759,7 +759,11 @@ mod tests {
         let cursor = Cursor::new(buffer);
         let reader = Reader::new(cursor).unwrap();
 
-        let read_records: Vec<Record> = reader.collect::<Result<Vec<_>, _>>().unwrap();
+        let read_records: Vec<Record> = reader
+            .iter_records()
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(original_records, read_records);
     }
 
@@ -856,7 +860,11 @@ mod tests {
         // Verify by reading back
         let cursor = Cursor::new(buffer);
         let reader = Reader::new(cursor).unwrap();
-        let read_records: Vec<Record> = reader.collect::<Result<Vec<_>, _>>().unwrap();
+        let read_records: Vec<Record> = reader
+            .iter_records()
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
 
         assert_eq!(read_records.len(), 6);
         assert_eq!(read_records[0], Record::new(1, 2, 3));

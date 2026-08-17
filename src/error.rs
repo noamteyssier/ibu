@@ -118,6 +118,10 @@ pub enum IbuError {
     #[error("Invalid index ({idx}) - Must be less than {max}")]
     InvalidIndex { idx: usize, max: usize },
 
+    /// Mismatch in expected record type
+    #[error("Invalid record type: expected extended ({ext_expected}) but is extended ({is_ext})")]
+    ExtendedRecordMismatch { is_ext: bool, ext_expected: bool },
+
     /// Error occurred during parallel processing.
     ///
     /// This wraps errors that occur in user-defined parallel processors,
