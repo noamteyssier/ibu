@@ -7,9 +7,14 @@ use bytemuck::Pod;
 ///
 /// This trait allows readers, writers, and downstream tooling (sorting, deduplication,
 /// parallel processing, etc.) to be written once and remain generic over the concrete
-/// record layout. It is implemented by [`Record`](crate::Record) (24-byte classic records)
-/// and [`ExtRecord`](crate::ExtRecord) (64-byte extended records carrying a variable-length
-/// 2-bit packed sequence).
+/// record layout. It is implemented by:
+///
+/// - [`Record`](crate::Record): classic 24-byte records
+/// - [`ExtRecord`](crate::ExtRecord): 64-byte records carrying a variable-length
+///   2-bit packed sequence
+/// - [`RecordCount`](crate::RecordCount) / [`ExtRecordCount`](crate::ExtRecordCount):
+///   32/72-byte counted variants of the above, collapsing repeated observations
+///   into a single record with a multiplicity
 ///
 /// # Requirements
 ///
@@ -41,6 +46,15 @@ pub trait IbuRecord: Pod + Eq + Ord + Hash + Debug + Send + Sync {
     /// Whether this record type corresponds to the extended flag in the file header.
     const EXTENDED: bool;
 
+    /// Whether this record type corresponds to the counted flag in the file header.
+    const COUNTED: bool;
+
+    /// The counted form of this record type, used when deduplicating.
+    ///
+    /// For uncounted types this is the corresponding `*Count` type; counted types
+    /// are their own counted form.
+    type Counted: IbuRecord<Counted = Self::Counted>;
+
     /// The 2-bit encoded cell barcode.
     fn barcode(&self) -> u64;
 
@@ -49,4 +63,28 @@ pub trait IbuRecord: Pod + Eq + Ord + Hash + Debug + Send + Sync {
 
     /// The application-specific index value.
     fn index(&self) -> u64;
+
+    /// The multiplicity of this record.
+    ///
+    /// Returns the stored count for counted record types and `1` for uncounted
+    /// types, so aggregation code can be written generically over both.
+    #[inline(always)]
+    fn count(&self) -> u64 {
+        1
+    }
+
+    /// Returns whether two records represent the same observation, ignoring
+    /// any stored count.
+    ///
+    /// This is the equivalence used when deduplicating: uncounted types compare
+    /// full equality, counted types compare only their inner record payload.
+    #[inline(always)]
+    fn same_key(&self, other: &Self) -> bool {
+        self == other
+    }
+
+    /// Converts this record into its counted form with the given total count.
+    ///
+    /// For counted types this replaces the stored count.
+    fn to_counted(&self, count: u64) -> Self::Counted;
 }

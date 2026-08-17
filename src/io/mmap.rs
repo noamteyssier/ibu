@@ -152,12 +152,7 @@ impl<T: IbuRecord> MmapReader<T> {
             header.validate()?;
             header
         };
-        if header.extended() != T::EXTENDED {
-            return Err(IbuError::ExtendedRecordMismatch {
-                is_ext: header.extended(),
-                ext_expected: T::EXTENDED,
-            });
-        }
+        header.matches_record_type::<T>()?;
 
         let record_buffer = &map[HEADER_SIZE..];
         if record_buffer.len() % T::SIZE != 0 {
@@ -624,9 +619,10 @@ mod tests {
         let result: crate::Result<MmapReader<ExtRecord>> = MmapReader::new(temp_file);
         assert!(matches!(
             result,
-            Err(IbuError::ExtendedRecordMismatch {
-                is_ext: false,
-                ext_expected: true
+            Err(IbuError::RecordTypeMismatch {
+                file_extended: false,
+                requested_extended: true,
+                ..
             })
         ));
 

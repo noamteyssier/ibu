@@ -10,16 +10,23 @@
 //! ## Format Specification
 //!
 //! The binary format consists of a 32-byte header followed by a collection of fixed-size
-//! records. A file contains either classic 24-byte records or extended 64-byte records,
-//! discriminated by the header's extended flag:
+//! records. The record type of a file is discriminated by two header flags - extended
+//! (bit 1) and counted (bit 2) - giving four record layouts:
+//!
+//! | extended | counted | record type      | size |
+//! |----------|---------|------------------|------|
+//! | no       | no      | `Record`         | 24   |
+//! | no       | yes     | `RecordCount`    | 32   |
+//! | yes      | no      | `ExtRecord`      | 64   |
+//! | yes      | yes     | `ExtRecordCount` | 72   |
 //!
 //! ### Header (32 bytes)
 //! - Magic number: `0x21554249` ("IBU!")
 //! - Version: Format version (currently 3; version 2 files with classic records
-//!   remain readable, while extended records require version 3)
+//!   remain readable, while extended and counted records require version 3)
 //! - Barcode length: Length in bases (max 32)
 //! - UMI length: Length in bases (max 32)
-//! - Flags: Bit flags (bit 0 = sorted, bit 1 = extended records)
+//! - Flags: Bit flags (bit 0 = sorted, bit 1 = extended records, bit 2 = counted records)
 //! - Reserved: 8 bytes for future use
 //!
 //! ### Record (24 bytes)
@@ -33,6 +40,14 @@
 //! - Index: `u64` application-specific value
 //! - Sequence length: `u64` number of bases (max 128)
 //! - Sequence: 32 bytes of 2-bit packed nucleotides (max 128bp; fixed size)
+//!
+//! ### RecordCount (32 bytes) / ExtRecordCount (72 bytes)
+//! - The corresponding record layout, followed by:
+//! - Count: `u64` multiplicity of the record
+//!
+//! Counted records deduplicate the heavy repetition typical of single-cell data:
+//! a sorted stream of records can be collapsed into counted records with
+//! [`dedup_sorted`], storing each distinct observation once with its multiplicity.
 //!
 //! All record types implement the [`IbuRecord`] trait, so readers, writers, and
 //! downstream tooling (sorting, deduplication, parallel processing) can be written
@@ -184,14 +199,17 @@
 //! ```
 
 mod constructs;
+mod dedup;
 mod error;
 mod io;
 mod parallel;
 
 pub use constructs::{
-    ExtRecord, ExtRecordBuffer, Header, IbuRecord, Record, EXT_RECORD_SIZE, HEADER_SIZE, MAGIC,
-    MIN_VERSION, RECORD_SIZE, VERSION,
+    ExtRecord, ExtRecordBuffer, ExtRecordCount, Header, IbuRecord, Record, RecordCount,
+    EXTENDED_RECORD_COUNT_SIZE, EXT_RECORD_SIZE, HEADER_SIZE, MAGIC, MIN_VERSION,
+    RECORD_COUNT_SIZE, RECORD_SIZE, VERSION,
 };
+pub use dedup::{dedup_sorted, DedupSorted};
 pub use error::{IbuError, IntoIbuError, Result};
 pub use io::{load_to_vec, MmapReader, Reader, Writer};
 pub use parallel::{ParallelProcessor, ParallelReader};

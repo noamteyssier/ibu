@@ -135,6 +135,9 @@ impl Record {
 
 impl IbuRecord for Record {
     const EXTENDED: bool = false;
+    const COUNTED: bool = false;
+
+    type Counted = crate::RecordCount;
 
     #[inline(always)]
     fn barcode(&self) -> u64 {
@@ -149,6 +152,11 @@ impl IbuRecord for Record {
     #[inline(always)]
     fn index(&self) -> u64 {
         self.index
+    }
+
+    #[inline(always)]
+    fn to_counted(&self, count: u64) -> Self::Counted {
+        crate::RecordCount::new(*self, count)
     }
 }
 
