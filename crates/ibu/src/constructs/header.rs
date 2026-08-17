@@ -654,7 +654,7 @@ mod tests {
         assert_ne!(header1, header3);
 
         // Test Clone and Copy
-        let cloned = header1.clone();
+        let cloned = header1;
         assert_eq!(header1, cloned);
 
         let copied = header1;

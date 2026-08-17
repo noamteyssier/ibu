@@ -573,6 +573,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn test_batch_size_constant() {
         assert_eq!(BATCH_SIZE, 1024 * 1024);
         assert!(BATCH_SIZE > 0);

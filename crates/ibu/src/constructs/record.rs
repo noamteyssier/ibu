@@ -302,7 +302,7 @@ mod tests {
         assert_ne!(record1, record3);
 
         // Test Clone and Copy
-        let cloned = record1.clone();
+        let cloned = record1;
         assert_eq!(record1, cloned);
 
         let copied = record1;

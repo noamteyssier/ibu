@@ -87,7 +87,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             checksum ^= record.index;
 
             // Progress indicator
-            if records_read % 10_000_000 == 0 {
+            if records_read.is_multiple_of(10_000_000) {
                 let elapsed = read_start.elapsed().as_secs_f64();
                 let rate = records_read as f64 / elapsed / 1_000_000.0;
                 print!(
