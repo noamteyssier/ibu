@@ -1,0 +1,36 @@
+[package]
+name = "ibu"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+documentation = "https://docs.rs/ibu"
+description = "A library for high throughput binary encoding genomic sequences"
+keywords = ["bioinformatics", "genomics", "binary", "encoding", "compression"]
+categories = ["science", "data-structures", "encoding"]
+
+[dependencies]
+bitnuc = { workspace = true }
+bytemuck = { workspace = true }
+ext-sort = { workspace = true, optional = true }
+memmap2 = { workspace = true }
+niffler = { workspace = true, optional = true }
+num_cpus = { workspace = true }
+serde = { workspace = true, optional = true }
+thiserror = { workspace = true }
+
+[features]
+default = ["serde", "niffler", "ext-sort"]
+serde = ["dep:serde"]
+niffler = ["dep:niffler"]
+ext-sort = ["dep:ext-sort"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dev-dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+rand = { workspace = true }
