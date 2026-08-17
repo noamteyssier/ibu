@@ -209,7 +209,7 @@ pub use constructs::{
     EXTENDED_RECORD_COUNT_SIZE, EXT_RECORD_SIZE, HEADER_SIZE, MAGIC, MIN_VERSION,
     RECORD_COUNT_SIZE, RECORD_SIZE, VERSION,
 };
-pub use dedup::{dedup_sorted, DedupSorted};
+pub use dedup::{dedup_sorted, DedupExt, DedupResults, DedupSorted};
 pub use error::{IbuError, IntoIbuError, Result};
 pub use io::{load_to_vec, MmapReader, Reader, Writer};
 pub use parallel::{ParallelProcessor, ParallelReader};

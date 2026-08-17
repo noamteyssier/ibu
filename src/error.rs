@@ -139,6 +139,10 @@ pub enum IbuError {
     #[error("Invalid sequence length: {len} (must be <= {max})")]
     InvalidSequenceLength { len: usize, max: usize },
 
+    /// Expecting sorted IBU records but found unsorted
+    #[error("Found an unsorted IBU record when expecting sorted")]
+    ExpectingSortedIbu,
+
     /// Error occurred during parallel processing.
     ///
     /// This wraps errors that occur in user-defined parallel processors,

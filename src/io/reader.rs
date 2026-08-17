@@ -1015,7 +1015,7 @@ mod tests {
         let buffer = create_test_data(&raw);
         let reader = Reader::new(Cursor::new(buffer)).unwrap();
         let deduped = dedup_sorted(reader.iter_records().unwrap().map(Result::unwrap));
-        writer.write_iter(deduped).unwrap();
+        writer.write_iter(deduped.map(Result::unwrap)).unwrap();
         writer.finish().unwrap();
 
         // the counted file preserves the total multiplicity in far fewer records
