@@ -10,10 +10,11 @@ use std::io::Write;
 use std::ops::AddAssign;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use ibu::{IbuError, IbuRecord, Reader, Writer};
+use parking_lot::Mutex;
 
 use crate::utils::{match_output, with_record_type, Input, Output};
 
@@ -361,7 +362,7 @@ fn correct_records<T: IbuRecord>(
                     barcode_set.clear();
 
                     let my_ticket = {
-                        let mut reader = treader.lock().expect("reader lock poisoned");
+                        let mut reader = treader.lock();
 
                         // Try to read first
                         if !reader.fill_barcode_set(&mut barcode_set)? {
