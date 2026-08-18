@@ -150,6 +150,11 @@ impl IbuRecord for Record {
     }
 
     #[inline(always)]
+    fn set_umi(&mut self, umi: u64) {
+        self.umi = umi;
+    }
+
+    #[inline(always)]
     fn index(&self) -> u64 {
         self.index
     }
