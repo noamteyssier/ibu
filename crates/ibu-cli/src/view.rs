@@ -8,7 +8,6 @@ use crate::utils::{match_output, with_record_type, Input, Output};
 #[derive(clap::Parser, Debug)]
 pub struct ArgsView {
     /// Input IBU file [default=stdin]
-    #[clap(short, long)]
     pub input: Option<String>,
 
     /// Output file [default=stdout]

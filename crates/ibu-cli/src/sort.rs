@@ -13,7 +13,6 @@ const DEFAULT_MEMORY_LIMIT: u64 = 5;
 #[derive(clap::Parser, Debug)]
 pub struct ArgsSort {
     /// Input IBU file [default=stdin]
-    #[clap(short, long)]
     pub input: Option<String>,
 
     /// Output file to write to
