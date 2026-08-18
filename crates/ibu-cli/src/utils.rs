@@ -17,20 +17,3 @@ pub fn match_output(path: Option<&String>) -> Result<Output> {
         Ok(Box::new(BufWriter::new(stdout())))
     }
 }
-
-/// Dispatches a generic function call over the record type described by a header.
-///
-/// Expands to a match on the header's (extended, counted) flags, invoking the
-/// function with the corresponding concrete record type as its first type
-/// parameter.
-macro_rules! with_record_type {
-    ($header:expr, $func:ident($($args:expr),* $(,)?)) => {
-        match ($header.extended(), $header.counts()) {
-            (false, false) => $func::<ibu::Record>($($args),*),
-            (false, true) => $func::<ibu::RecordCount>($($args),*),
-            (true, false) => $func::<ibu::ExtRecord>($($args),*),
-            (true, true) => $func::<ibu::ExtRecordCount>($($args),*),
-        }
-    };
-}
-pub(crate) use with_record_type;

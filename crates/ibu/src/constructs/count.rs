@@ -189,6 +189,10 @@ impl IbuRecord for ExtRecordCount {
     fn to_counted(&self, count: u64) -> Self::Counted {
         Self::new(self.record, count)
     }
+
+    fn sequence(&self) -> crate::Result<Option<crate::ExtRecordBufferAscii>> {
+        self.record.sequence()
+    }
 }
 
 #[cfg(test)]

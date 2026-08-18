@@ -67,6 +67,15 @@ pub trait IbuRecord: Pod + Eq + Ord + Hash + Debug + Send + Sync {
     /// The application-specific index value.
     fn index(&self) -> u64;
 
+    /// The decoded (ASCII) nucleotide sequence carried by the record, if any.
+    ///
+    /// Returns `None` for record types without a sequence payload, so
+    /// presentation and analysis code can be written generically over all
+    /// record types.
+    fn sequence(&self) -> crate::Result<Option<crate::ExtRecordBufferAscii>> {
+        Ok(None)
+    }
+
     /// The multiplicity of this record.
     ///
     /// Returns the stored count for counted record types and `1` for uncounted
