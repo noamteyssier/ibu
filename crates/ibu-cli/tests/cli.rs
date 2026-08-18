@@ -217,6 +217,133 @@ fn test_view_ext_counted() {
     assert_eq!(text.trim(), "0\t0\t7\tACGTACGT\t99");
 }
 
+/// Sorted records where each (barcode, index) group has a dominant UMI plus a
+/// rare HD=1 error UMI that should be corrected into it.
+fn umi_error_records() -> Vec<Record> {
+    let mut records = Vec::new();
+    for barcode in 0..50u64 {
+        for index in 0..4u64 {
+            let dominant = 0b0000; // "AA..."
+            let error = 0b0001; // single-base substitution (HD=1)
+            for _ in 0..10 {
+                records.push(Record::new(barcode, dominant, index));
+            }
+            records.push(Record::new(barcode, error, index));
+        }
+    }
+    records.sort_unstable();
+    records
+}
+
+#[test]
+fn test_umi_correction() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    let derived = dir.path().join("in.umi.ibu");
+    write_records(&input, &umi_error_records());
+
+    let out = ibu_bin().arg("umi").arg(&input).output().unwrap();
+    assert!(out.status.success());
+
+    // stats JSON lands on stderr: 200 of 2200 reads corrected
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("\"total\": 2200"), "stderr: {stderr}");
+    assert!(stderr.contains("\"corrected\": 200"), "stderr: {stderr}");
+
+    let reader = Reader::new(std::fs::File::open(&derived).unwrap()).unwrap();
+    assert!(reader.header().sorted());
+    let records: Vec<Record> = reader
+        .iter_records()
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(records.len(), 2200);
+    assert!(
+        records.windows(2).all(|w| w[0] <= w[1]),
+        "output not sorted"
+    );
+    assert!(
+        records.iter().all(|r| r.umi == 0),
+        "uncorrected UMIs remain"
+    );
+}
+
+#[test]
+fn test_umi_correction_threaded_matches_single() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    let single = dir.path().join("single.ibu");
+    let threaded = dir.path().join("threaded.ibu");
+    write_records(&input, &umi_error_records());
+
+    for (output, threads) in [(&single, "1"), (&threaded, "4")] {
+        let status = ibu_bin()
+            .arg("umi")
+            .arg(&input)
+            .arg("-o")
+            .arg(output)
+            .args(["-T", threads])
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    // ticketed writer keeps output deterministic across thread counts
+    assert_eq!(
+        std::fs::read(&single).unwrap(),
+        std::fs::read(&threaded).unwrap()
+    );
+}
+
+#[test]
+fn test_umi_correction_counted_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    let output = dir.path().join("out.ibu");
+
+    // the error UMI has more rows but fewer reads - counts decide abundance
+    let records = vec![
+        RecordCount::new(Record::new(0, 0b0000, 0), 100),
+        RecordCount::new(Record::new(0, 0b0001, 0), 2),
+        RecordCount::new(Record::new(0, 0b0001, 0), 3),
+    ];
+    write_records(&input, &records);
+
+    let out = ibu_bin()
+        .arg("umi")
+        .arg(&input)
+        .arg("-o")
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("\"total\": 105"), "stderr: {stderr}");
+    assert!(stderr.contains("\"corrected\": 5"), "stderr: {stderr}");
+
+    let reader = Reader::new(std::fs::File::open(&output).unwrap()).unwrap();
+    assert!(reader.header().counts());
+    let corrected: Vec<RecordCount> = reader
+        .iter_record_counts()
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert!(corrected.iter().all(|r| r.record.umi == 0));
+    let total: u64 = corrected.iter().map(|r| r.count).sum();
+    assert_eq!(total, 105);
+}
+
+#[test]
+fn test_umi_correction_rejects_unsorted() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    write_records(&input, &[Record::new(5, 0, 0), Record::new(1, 0, 0)]);
+
+    let out = ibu_bin().arg("umi").arg(&input).output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("unsorted"));
+}
+
 #[test]
 fn test_sort_pipe_roundtrip() {
     use std::io::Write as _;
