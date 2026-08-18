@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use bytesize::ByteSize;
 use ibu::ext_sort::{ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
 use ibu::{dedup_sorted, DedupExt, Header, IbuError, IbuExternalChunk, IbuRecord, Reader, Writer};
@@ -17,8 +17,9 @@ pub struct ArgsSort {
 
     /// Output file to write to
     ///
-    /// Required unless `-p/--pipe` is present.
-    #[clap(short, long, required_unless_present("pipe"))]
+    /// Defaults to the input path with its `.ibu` extension replaced by
+    /// `.sort.ibu`. Reading from stdin requires either this or `-p/--pipe`.
+    #[clap(short, long)]
     pub output: Option<String>,
 
     /// Pipe the output to stdout
@@ -50,12 +51,35 @@ pub struct ArgsSort {
     pub threads: usize,
 }
 
-fn sort_typed<T: IbuRecord>(args: &ArgsSort, reader: Reader<Input>) -> Result<()> {
+/// Derives the default output path for a sorted file: `x.ibu` -> `x.sort.ibu`.
+///
+/// Inputs without a `.ibu` extension get `.sort.ibu` appended.
+fn derive_sorted_path(input: &str) -> String {
+    let stem = input.strip_suffix(".ibu").unwrap_or(input);
+    format!("{stem}.sort.ibu")
+}
+
+/// Resolves the output target: explicit path, stdout pipe, or a path derived
+/// from the input filename.
+fn resolve_output(args: &ArgsSort) -> Result<Option<String>> {
+    if args.pipe {
+        Ok(None)
+    } else if let Some(output) = &args.output {
+        Ok(Some(output.clone()))
+    } else if let Some(input) = &args.input {
+        let derived = derive_sorted_path(input);
+        eprintln!("Writing sorted output to: {derived}");
+        Ok(Some(derived))
+    } else {
+        bail!("Reading from stdin requires an output target: pass -o/--output or -p/--pipe")
+    }
+}
+
+fn sort_typed<T: IbuRecord>(args: &ArgsSort, reader: Reader<Input>, output: Output) -> Result<()> {
     // The output of this command is sorted by construction
     let mut header = reader.header();
     header.set_sorted();
 
-    let output = match_output(args.output.as_ref())?;
     let records = reader.records::<T>()?;
 
     if args.in_memory {
@@ -118,9 +142,29 @@ fn write_records<T: IbuRecord>(
 }
 
 pub fn run(args: &ArgsSort) -> Result<()> {
+    // Resolve the output target before opening the reader (so stdin without a
+    // target fails fast), but only create the file once the input is open
+    let output_path = resolve_output(args)?;
     let reader = Reader::from_optional_path(args.input.as_ref())?;
     let header = reader.header();
+    let output = match_output(output_path.as_ref())?;
 
     // Dispatch on the file's record type; everything downstream is generic
-    with_record_type!(header, sort_typed(args, reader))
+    with_record_type!(header, sort_typed(args, reader, output))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::derive_sorted_path;
+
+    #[test]
+    fn test_derive_sorted_path() {
+        assert_eq!(derive_sorted_path("data.ibu"), "data.sort.ibu");
+        assert_eq!(
+            derive_sorted_path("path/to/data.ibu"),
+            "path/to/data.sort.ibu"
+        );
+        assert_eq!(derive_sorted_path("data"), "data.sort.ibu");
+        assert_eq!(derive_sorted_path("data.ibu.gz"), "data.ibu.gz.sort.ibu");
+    }
 }

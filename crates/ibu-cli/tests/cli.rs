@@ -33,7 +33,7 @@ fn test_sort() {
     write_records(&input, &test_records());
 
     let status = ibu_bin()
-        .args(["sort", "-i"])
+        .arg("sort")
         .arg(&input)
         .arg("-o")
         .arg(&output)
@@ -53,6 +53,41 @@ fn test_sort() {
 }
 
 #[test]
+fn test_sort_default_output_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    let derived = dir.path().join("in.sort.ibu");
+    write_records(&input, &test_records());
+
+    // no -o and no -p: output path is derived from the input
+    let out = ibu_bin().arg("sort").arg(&input).output().unwrap();
+    assert!(out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("Writing sorted output to:"),
+        "derived output path should be announced on stderr"
+    );
+
+    let reader = Reader::new(std::fs::File::open(&derived).unwrap()).unwrap();
+    assert!(reader.header().sorted());
+    let records: Vec<Record> = reader
+        .iter_records()
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(records.len(), 10_000);
+}
+
+#[test]
+fn test_sort_stdin_requires_output_target() {
+    use std::process::Stdio;
+
+    // stdin input with neither -o nor -p is an error (no name to derive)
+    let out = ibu_bin().arg("sort").stdin(Stdio::null()).output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("requires an output target"));
+}
+
+#[test]
 fn test_sort_dedup() {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("in.ibu");
@@ -62,7 +97,7 @@ fn test_sort_dedup() {
 
     for (output, extra) in [(&external, None), (&in_memory, Some("--in-memory"))] {
         let mut cmd = ibu_bin();
-        cmd.args(["sort", "--dedup", "-i"])
+        cmd.args(["sort", "--dedup"])
             .arg(&input)
             .arg("-o")
             .arg(output);
@@ -151,7 +186,7 @@ fn test_view() {
     write_records(&input, &[Record::new(16, 0, 42)]);
 
     // encoded view
-    let out = ibu_bin().args(["view", "-i"]).arg(&input).output().unwrap();
+    let out = ibu_bin().arg("view").arg(&input).output().unwrap();
     assert!(out.status.success());
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.contains("# barcode_len: 16"));
@@ -159,7 +194,7 @@ fn test_view() {
 
     // decoded view without the header block
     let out = ibu_bin()
-        .args(["view", "-d", "-S", "-i"])
+        .args(["view", "-d", "-S"])
         .arg(&input)
         .output()
         .unwrap();
@@ -175,11 +210,7 @@ fn test_view_ext_counted() {
     let record = ExtRecord::from_sequence(0, 0, 7, b"ACGTACGT").unwrap();
     write_records(&input, &[record.to_counted(99)]);
 
-    let out = ibu_bin()
-        .args(["view", "-S", "-i"])
-        .arg(&input)
-        .output()
-        .unwrap();
+    let out = ibu_bin().args(["view", "-S"]).arg(&input).output().unwrap();
     assert!(out.status.success());
     let text = String::from_utf8(out.stdout).unwrap();
     // barcode, umi, index, sequence, count
