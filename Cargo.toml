@@ -1,31 +1,30 @@
-[package]
-name = "ibu"
-version = "0.2.1"
-authors = ["Noam Teyssier <noam.teyssier@arcinstitute.org"]
-repository = "https://github.com/noamteyssier/ibu"
-documentation = "https://docs.rs/ibu"
-description = "A library for high throughput binary encoding genomic sequences"
+[workspace]
+resolver = "2"
+members = ["crates/ibu", "crates/ibu-cli"]
+
+[workspace.package]
+version = "0.3.0"
+authors = ["Noam Teyssier"]
 edition = "2021"
 license = "MIT"
-keywords = ["bioinformatics", "genomics", "binary", "encoding", "compression"]
-categories = ["science", "data-structures", "encoding"]
+repository = "https://github.com/noamteyssier/ibu"
+readme = "README.md"
 
+[workspace.dependencies]
+# internal
+ibu = { path = "crates/ibu", version = "0.3.0" }
 
-[dependencies]
+# external
+anyhow = "1.0.100"
 bitnuc = "0.5.2"
 bytemuck = { version = "1.24.0", features = ["derive", "extern_crate_alloc"] }
-memmap2 = "0.9.9"
-niffler = {version = "3.0.0", optional = true }
-num_cpus = "1.17.0"
-serde = { version = "1.0.228", features = ["derive"], optional = true }
-thiserror = "2.0.17"
-
-[features]
-default = ["serde", "niffler"]
-serde = ["dep:serde"]
-niffler = ["dep:niffler"]
-
-[dev-dependencies]
-anyhow = "1.0.100"
+bytesize = "2.3.1"
 clap = { version = "4.5.53", features = ["derive"] }
+ext-sort = "0.1.5"
+memmap2 = "0.9.9"
+niffler = "3.0.0"
+num_cpus = "1.17.0"
 rand = "0.9.2"
+serde = { version = "1.0.228", features = ["derive"] }
+tempfile = "3.23.0"
+thiserror = "2.0.17"

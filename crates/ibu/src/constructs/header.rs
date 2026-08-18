@@ -1,6 +1,9 @@
 use bytemuck::{Pod, Zeroable};
 
-use crate::IbuError;
+use crate::{
+    IbuError, IbuRecord, EXTENDED_RECORD_COUNT_SIZE, EXT_RECORD_SIZE, RECORD_COUNT_SIZE,
+    RECORD_SIZE,
+};
 
 pub const MAGIC: u32 = 0x21554249; // "IBU!"
 
@@ -9,18 +12,20 @@ pub const MAGIC: u32 = 0x21554249; // "IBU!"
 /// Version history:
 /// - 1: initial format
 /// - 2: current header layout, classic 24-byte records only
-/// - 3: introduces the extended flag (bit 1) and 64-byte extended records
+/// - 3: introduces the extended flag (bit 1) with 64-byte extended records, and
+///   the counted flag (bit 2) with counted record variants
 pub const VERSION: u32 = 3;
 
 /// Minimum format version this library can read.
 ///
 /// Version 2 files remain fully readable, but may only contain classic records:
-/// version 2 readers in the wild are unaware of the extended flag and would
-/// silently misparse 64-byte records, so extended files must be version 3+.
+/// version 2 readers in the wild are unaware of the extended and counted flags
+/// and would silently misparse the larger record layouts, so files using either
+/// flag must be version 3+.
 pub const MIN_VERSION: u32 = 2;
 
-/// Minimum format version that supports extended records.
-const EXT_MIN_VERSION: u32 = 3;
+/// Minimum format version that supports the extended and counted flags.
+const FLAGGED_MIN_VERSION: u32 = 3;
 
 pub const HEADER_SIZE: usize = std::mem::size_of::<Header>();
 
@@ -30,6 +35,9 @@ const IS_SORTED: u64 = 1 << 0;
 /// Records are extended
 const IS_EXTENDED: u64 = 1 << 1;
 
+/// Records are counted
+const IS_COUNT: u64 = 1 << 2;
+
 /// Binary format header for IBU files.
 ///
 /// The header is exactly 32 bytes in size, making it cache-line friendly on most
@@ -38,14 +46,14 @@ const IS_EXTENDED: u64 = 1 << 1;
 ///
 /// # Binary Layout
 ///
-/// | Offset | Size | Field         | Description                                    |
-/// |--------|------|---------------|------------------------------------------------|
-/// | 0      | 4    | magic         | Magic number: 0x21554249 ("IBU!")            |
-/// | 4      | 4    | version       | Format version (currently 3, reads 2+)        |
-/// | 8      | 4    | bc_len        | Barcode length in bases (1-32)                |
-/// | 12     | 4    | umi_len       | UMI length in bases (1-32)                    |
-/// | 16     | 8    | flags         | Bit flags (bit 0: sorted, bit 1: extended)    |
-/// | 24     | 8    | reserved      | Reserved bytes for future extensions          |
+/// | Offset | Size | Field         | Description                                        |
+/// |--------|------|---------------|----------------------------------------------------|
+/// | 0      | 4    | magic         | Magic number: 0x21554249 ("IBU!")                  |
+/// | 4      | 4    | version       | Format version (currently 3, reads 2+)             |
+/// | 8      | 4    | bc_len        | Barcode length in bases (1-32)                     |
+/// | 12     | 4    | umi_len       | UMI length in bases (1-32)                         |
+/// | 16     | 8    | flags         | Bit flags (bit 0: sorted, 1: extended, 2: counted) |
+/// | 24     | 8    | reserved      | Reserved bytes for future extensions               |
 ///
 /// # Examples
 ///
@@ -79,8 +87,11 @@ pub struct Header {
     pub umi_len: u32,
     /// Bit flags:
     ///
-    /// bit 0 = sorted, others reserved for future use
-    /// bit 1 = extended, others reserved for future use
+    /// bit 0 = sorted
+    /// bit 1 = extended
+    /// bit 2 = counted
+    ///
+    /// others reserved for future use
     pub flags: u64,
     /// Reserved bytes for future extensions
     pub reserved: [u8; 8],
@@ -146,7 +157,18 @@ impl Header {
     /// with a version that pre-extension readers would accept and then misparse.
     pub fn set_extended(&mut self) {
         self.flags |= IS_EXTENDED;
-        self.version = self.version.max(EXT_MIN_VERSION);
+        self.version = self.version.max(FLAGGED_MIN_VERSION);
+    }
+
+    /// Marks the file as containing counted IBU records.
+    ///
+    /// Counted records were introduced in format version 3, so like
+    /// [`Header::set_extended`] this upgrades the header's version if it is older,
+    /// guaranteeing counted files are never stamped with a version that
+    /// pre-count readers would accept and then misparse.
+    pub fn set_counts(&mut self) {
+        self.flags |= IS_COUNT;
+        self.version = self.version.max(FLAGGED_MIN_VERSION);
     }
 
     /// Returns whether the file is marked as containing sorted records.
@@ -173,6 +195,52 @@ impl Header {
     #[inline(always)]
     pub fn extended(&self) -> bool {
         self.flags & IS_EXTENDED != 0
+    }
+
+    /// Returns whether the file contains record counts
+    #[inline(always)]
+    pub fn counts(&self) -> bool {
+        self.flags & IS_COUNT != 0
+    }
+
+    /// Returns the size in bytes of a single record in this file.
+    ///
+    /// Determined by the extended and counted flags:
+    ///
+    /// | extended | counted | record type                          | size |
+    /// |----------|---------|--------------------------------------|------|
+    /// | no       | no      | [`Record`](crate::Record)            | 24   |
+    /// | no       | yes     | [`RecordCount`](crate::RecordCount)  | 32   |
+    /// | yes      | no      | [`ExtRecord`](crate::ExtRecord)      | 64   |
+    /// | yes      | yes     | [`ExtRecordCount`](crate::ExtRecordCount) | 72 |
+    #[inline(always)]
+    pub fn record_size(&self) -> usize {
+        match (self.extended(), self.counts()) {
+            (false, false) => RECORD_SIZE,
+            (false, true) => RECORD_COUNT_SIZE,
+            (true, false) => EXT_RECORD_SIZE,
+            (true, true) => EXTENDED_RECORD_COUNT_SIZE,
+        }
+    }
+
+    /// Validates that the record type `T` matches this header's flags.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IbuError::RecordTypeMismatch`] if the file's extended or counted
+    /// flag disagrees with the requested record type.
+    #[inline(always)]
+    pub fn matches_record_type<T: IbuRecord>(&self) -> crate::Result<()> {
+        if self.extended() == T::EXTENDED && self.counts() == T::COUNTED {
+            Ok(())
+        } else {
+            Err(IbuError::RecordTypeMismatch {
+                file_extended: self.extended(),
+                file_counted: self.counts(),
+                requested_extended: T::EXTENDED,
+                requested_counted: T::COUNTED,
+            })
+        }
     }
 
     /// Validates the header fields.
@@ -224,11 +292,11 @@ impl Header {
                 actual: self.version,
             });
         }
-        // Extended records were introduced in version 3; a version 2 file claiming
-        // extended records is malformed (and would be misparsed by v2 readers).
-        if self.extended() && self.version < EXT_MIN_VERSION {
+        // Extended and counted records were introduced in version 3; a version 2
+        // file claiming either is malformed (and would be misparsed by v2 readers).
+        if (self.extended() || self.counts()) && self.version < FLAGGED_MIN_VERSION {
             return Err(IbuError::InvalidVersion {
-                min: EXT_MIN_VERSION,
+                min: FLAGGED_MIN_VERSION,
                 max: VERSION,
                 actual: self.version,
             });
@@ -423,6 +491,85 @@ mod tests {
     }
 
     #[test]
+    fn test_counts_flag() {
+        let mut header = Header::new(16, 12);
+        assert!(!header.counts());
+
+        header.set_counts();
+        assert!(header.counts());
+        assert!(!header.extended());
+        assert!(header.validate().is_ok());
+    }
+
+    #[test]
+    fn test_set_counts_upgrades_version() {
+        // a version 2 header is upgraded to version 3 when marked as counted
+        let mut header = Header::new(16, 12);
+        header.version = 2;
+
+        header.set_counts();
+        assert_eq!(header.version, 3);
+        assert!(header.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validation_version_2_counted_rejected() {
+        // a version 2 header claiming counted records is malformed
+        let mut header = Header::new(16, 12);
+        header.flags |= 1 << 2; // set counted flag without version upgrade
+        header.version = 2;
+
+        assert!(matches!(
+            header.validate(),
+            Err(IbuError::InvalidVersion {
+                min: 3,
+                actual: 2,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_record_size() {
+        use crate::{ExtRecord, ExtRecordCount, Record, RecordCount};
+
+        let mut header = Header::new(16, 12);
+        assert_eq!(header.record_size(), RECORD_SIZE);
+        assert!(header.matches_record_type::<Record>().is_ok());
+
+        header.set_counts();
+        assert_eq!(header.record_size(), RECORD_COUNT_SIZE);
+        assert!(header.matches_record_type::<RecordCount>().is_ok());
+
+        let mut header = Header::new(16, 12);
+        header.set_extended();
+        assert_eq!(header.record_size(), EXT_RECORD_SIZE);
+        assert!(header.matches_record_type::<ExtRecord>().is_ok());
+
+        header.set_counts();
+        assert_eq!(header.record_size(), EXTENDED_RECORD_COUNT_SIZE);
+        assert!(header.matches_record_type::<ExtRecordCount>().is_ok());
+    }
+
+    #[test]
+    fn test_matches_record_type_mismatch() {
+        use crate::{Record, RecordCount};
+
+        let mut header = Header::new(16, 12);
+        header.set_counts();
+
+        assert!(header.matches_record_type::<RecordCount>().is_ok());
+        assert!(matches!(
+            header.matches_record_type::<Record>(),
+            Err(IbuError::RecordTypeMismatch {
+                file_counted: true,
+                requested_counted: false,
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn test_validation_invalid_barcode_length() {
         let mut header = Header::new(16, 12);
 
@@ -507,7 +654,7 @@ mod tests {
         assert_ne!(header1, header3);
 
         // Test Clone and Copy
-        let cloned = header1.clone();
+        let cloned = header1;
         assert_eq!(header1, cloned);
 
         let copied = header1;

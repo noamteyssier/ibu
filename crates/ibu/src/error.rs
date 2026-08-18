@@ -122,13 +122,26 @@ pub enum IbuError {
     #[error("Invalid index ({idx}) - Must be less than {max}")]
     InvalidIndex { idx: usize, max: usize },
 
-    /// Mismatch in expected record type
-    #[error("Invalid record type: expected extended ({ext_expected}) but is extended ({is_ext})")]
-    ExtendedRecordMismatch { is_ext: bool, ext_expected: bool },
+    /// Mismatch between the record type in the file and the requested record type.
+    ///
+    /// IBU files are discriminated along two axes by header flags: extended
+    /// (bit 1) and counted (bit 2). This error reports both axes for the file
+    /// and for the record type the caller requested.
+    #[error("Record type mismatch: file contains (extended={file_extended}, counted={file_counted}) records but (extended={requested_extended}, counted={requested_counted}) records were requested")]
+    RecordTypeMismatch {
+        file_extended: bool,
+        file_counted: bool,
+        requested_extended: bool,
+        requested_counted: bool,
+    },
 
     /// Sequence is too long to fit in an extended record's packed buffer.
     #[error("Invalid sequence length: {len} (must be <= {max})")]
     InvalidSequenceLength { len: usize, max: usize },
+
+    /// Expecting sorted IBU records but found unsorted
+    #[error("Found an unsorted IBU record when expecting sorted")]
+    ExpectingSortedIbu,
 
     /// Error occurred during parallel processing.
     ///

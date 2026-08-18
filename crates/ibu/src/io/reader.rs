@@ -11,7 +11,7 @@ use std::{
 };
 
 use crate::{
-    ExtRecord, Header, IbuError, IbuRecord, Record, EXT_RECORD_SIZE, HEADER_SIZE, RECORD_SIZE,
+    ExtRecord, ExtRecordCount, Header, IbuError, IbuRecord, Record, RecordCount, HEADER_SIZE,
 };
 
 /// Number of records held in the internal buffer per batch read.
@@ -102,7 +102,8 @@ pub struct Reader<R: Read> {
     /// Header from the IBU file
     header: Header,
 
-    /// Size in bytes of a single record, derived from the header's extended flag
+    /// Size in bytes of a single record, derived from the header's extended and
+    /// counted flags
     record_size: usize,
 
     /// Current record position in the buffer (in records, not bytes)
@@ -167,11 +168,7 @@ impl<R: Read> Reader<R> {
             header
         };
 
-        let record_size = if header.extended() {
-            EXT_RECORD_SIZE
-        } else {
-            RECORD_SIZE
-        };
+        let record_size = header.record_size();
 
         // init buffer
         let buffer = Vec::with_capacity(DEFAULT_BUFFER_RECORDS * record_size);
@@ -292,33 +289,29 @@ impl<R: Read> Reader<R> {
 
     /// Iterate over records of an arbitrary [`IbuRecord`] type.
     ///
-    /// The requested record type must match the file's extended flag; use
-    /// [`Reader::iter_records`] and [`Reader::iter_ext_records`] as convenience
-    /// shorthands for the two concrete record types.
+    /// The requested record type must match the file's extended and counted flags;
+    /// use [`Reader::iter_records`], [`Reader::iter_ext_records`],
+    /// [`Reader::iter_record_counts`], and [`Reader::iter_ext_record_counts`] as
+    /// convenience shorthands for the four concrete record types.
     ///
     /// # Errors
     ///
-    /// Returns [`IbuError::ExtendedRecordMismatch`] if the file's extended flag
-    /// does not match the requested record type.
+    /// Returns [`IbuError::RecordTypeMismatch`] if the file's extended or counted
+    /// flag does not match the requested record type.
     pub fn records<T: IbuRecord>(self) -> Result<RecordIter<R, T>, IbuError> {
-        if self.header().extended() == T::EXTENDED {
-            Ok(RecordIter {
-                inner: self,
-                _record: PhantomData,
-            })
-        } else {
-            Err(IbuError::ExtendedRecordMismatch {
-                is_ext: self.header().extended(),
-                ext_expected: T::EXTENDED,
-            })
-        }
+        self.header().matches_record_type::<T>()?;
+        Ok(RecordIter {
+            inner: self,
+            _record: PhantomData,
+        })
     }
 
     /// Iterate over classic 24-byte [`Record`]s.
     ///
     /// # Errors
     ///
-    /// Returns [`IbuError::ExtendedRecordMismatch`] if the file contains extended records.
+    /// Returns [`IbuError::RecordTypeMismatch`] if the file contains a different
+    /// record type.
     pub fn iter_records(self) -> Result<RecordIter<R, Record>, IbuError> {
         self.records::<Record>()
     }
@@ -327,9 +320,30 @@ impl<R: Read> Reader<R> {
     ///
     /// # Errors
     ///
-    /// Returns [`IbuError::ExtendedRecordMismatch`] if the file contains classic records.
+    /// Returns [`IbuError::RecordTypeMismatch`] if the file contains a different
+    /// record type.
     pub fn iter_ext_records(self) -> Result<RecordIter<R, ExtRecord>, IbuError> {
         self.records::<ExtRecord>()
+    }
+
+    /// Iterate over counted 32-byte [`RecordCount`]s.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IbuError::RecordTypeMismatch`] if the file contains a different
+    /// record type.
+    pub fn iter_record_counts(self) -> Result<RecordIter<R, RecordCount>, IbuError> {
+        self.records::<RecordCount>()
+    }
+
+    /// Iterate over counted extended 72-byte [`ExtRecordCount`]s.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IbuError::RecordTypeMismatch`] if the file contains a different
+    /// record type.
+    pub fn iter_ext_record_counts(self) -> Result<RecordIter<R, ExtRecordCount>, IbuError> {
+        self.records::<ExtRecordCount>()
     }
 }
 
@@ -583,12 +597,7 @@ pub fn load_to_vec<P: AsRef<Path>, T: IbuRecord>(path: P) -> crate::Result<(Head
     file.read_exact(&mut header_bytes)?;
     let header = crate::Header::from_bytes(&header_bytes);
     header.validate()?;
-    if header.extended() != T::EXTENDED {
-        return Err(IbuError::ExtendedRecordMismatch {
-            is_ext: header.extended(),
-            ext_expected: T::EXTENDED,
-        });
-    }
+    header.matches_record_type::<T>()?;
 
     // Get file size and calculate number of records
     let metadata = file.metadata()?;
@@ -940,15 +949,111 @@ mod tests {
     }
 
     #[test]
+    fn test_count_reader_roundtrip() {
+        let records = vec![
+            RecordCount::new(Record::new(1, 2, 3), 100),
+            RecordCount::new(Record::new(4, 5, 6), 1),
+        ];
+
+        let header = Header::new(16, 12);
+        let mut writer: crate::Writer<_, RecordCount> =
+            crate::Writer::new(Vec::new(), header).unwrap();
+        writer.write_batch(&records).unwrap();
+        writer.finish().unwrap();
+
+        let reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
+        assert!(reader.header().counts());
+        assert!(!reader.header().extended());
+
+        let read_records: Vec<RecordCount> = reader
+            .iter_record_counts()
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(records, read_records);
+    }
+
+    #[test]
+    fn test_ext_count_reader_roundtrip() {
+        let records = vec![
+            ExtRecordCount::new(ExtRecord::from_sequence(1, 2, 3, b"ACGT").unwrap(), 42),
+            ExtRecordCount::new(ExtRecord::from_sequence(4, 5, 6, b"TTGG").unwrap(), 7),
+        ];
+
+        let header = Header::new(16, 12);
+        let mut writer: crate::Writer<_, ExtRecordCount> =
+            crate::Writer::new(Vec::new(), header).unwrap();
+        writer.write_batch(&records).unwrap();
+        writer.finish().unwrap();
+
+        let reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
+        assert!(reader.header().counts());
+        assert!(reader.header().extended());
+
+        let read_records: Vec<ExtRecordCount> = reader
+            .iter_ext_record_counts()
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(records, read_records);
+    }
+
+    #[test]
+    fn test_dedup_write_read_roundtrip() {
+        use crate::dedup_sorted;
+
+        // a sorted stream with heavy repetition, as in single-cell data
+        let raw: Vec<Record> = (0..10_000)
+            .map(|i| Record::new(i / 100, i / 10, 0))
+            .collect();
+
+        // read side: stream plain records, dedup, and write counted records
+        let header = Header::new(16, 12);
+        let mut writer: crate::Writer<_, RecordCount> =
+            crate::Writer::new(Vec::new(), header).unwrap();
+
+        let buffer = create_test_data(&raw);
+        let reader = Reader::new(Cursor::new(buffer)).unwrap();
+        let deduped = dedup_sorted(reader.iter_records().unwrap().map(Result::unwrap));
+        writer.write_iter(deduped.map(Result::unwrap)).unwrap();
+        writer.finish().unwrap();
+
+        // the counted file preserves the total multiplicity in far fewer records
+        let reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
+        let counted: Vec<RecordCount> = reader
+            .iter_record_counts()
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert!(counted.len() < raw.len());
+        let total: u64 = counted.iter().map(|c| c.count).sum();
+        assert_eq!(total, raw.len() as u64);
+    }
+
+    #[test]
     fn test_record_type_mismatch() {
         // plain file, extended iterator requested
         let buffer = create_test_data(&[Record::new(1, 2, 3)]);
         let reader = Reader::new(Cursor::new(buffer)).unwrap();
         assert!(matches!(
             reader.iter_ext_records(),
-            Err(IbuError::ExtendedRecordMismatch {
-                is_ext: false,
-                ext_expected: true
+            Err(IbuError::RecordTypeMismatch {
+                file_extended: false,
+                requested_extended: true,
+                ..
+            })
+        ));
+
+        // plain file, counted iterator requested
+        let buffer = create_test_data(&[Record::new(1, 2, 3)]);
+        let reader = Reader::new(Cursor::new(buffer)).unwrap();
+        assert!(matches!(
+            reader.iter_record_counts(),
+            Err(IbuError::RecordTypeMismatch {
+                file_counted: false,
+                requested_counted: true,
+                ..
             })
         ));
 
@@ -957,9 +1062,10 @@ mod tests {
         let reader = Reader::new(Cursor::new(buffer)).unwrap();
         assert!(matches!(
             reader.iter_records(),
-            Err(IbuError::ExtendedRecordMismatch {
-                is_ext: true,
-                ext_expected: false
+            Err(IbuError::RecordTypeMismatch {
+                file_extended: true,
+                requested_extended: false,
+                ..
             })
         ));
     }
@@ -988,10 +1094,7 @@ mod tests {
 
         // Wrong record type errors
         let result: crate::Result<(Header, Vec<Record>)> = load_to_vec(temp_path);
-        assert!(matches!(
-            result,
-            Err(IbuError::ExtendedRecordMismatch { .. })
-        ));
+        assert!(matches!(result, Err(IbuError::RecordTypeMismatch { .. })));
 
         fs::remove_file(temp_path).unwrap();
     }

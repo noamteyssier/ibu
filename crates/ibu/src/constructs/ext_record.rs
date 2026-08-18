@@ -156,6 +156,9 @@ impl ExtRecord {
 
 impl IbuRecord for ExtRecord {
     const EXTENDED: bool = true;
+    const COUNTED: bool = false;
+
+    type Counted = crate::ExtRecordCount;
 
     #[inline(always)]
     fn barcode(&self) -> u64 {
@@ -170,6 +173,11 @@ impl IbuRecord for ExtRecord {
     #[inline(always)]
     fn index(&self) -> u64 {
         self.index
+    }
+
+    #[inline(always)]
+    fn to_counted(&self, count: u64) -> Self::Counted {
+        crate::ExtRecordCount::new(*self, count)
     }
 }
 

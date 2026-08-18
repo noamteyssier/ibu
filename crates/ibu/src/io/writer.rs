@@ -5,7 +5,7 @@
 
 use std::{fs::File, io::Write, marker::PhantomData, path::Path};
 
-use crate::{Header, IbuError, IbuRecord, Record};
+use crate::{Header, IbuRecord, Record};
 
 /// Number of records held in the internal buffer before flushing.
 const DEFAULT_BUFFER_RECORDS: usize = 48 * 1024;
@@ -109,8 +109,8 @@ impl<W: Write, T: IbuRecord> Writer<W, T> {
     /// The header is written immediately to the underlying writer and validated.
     /// The writer is then ready to accept record data.
     ///
-    /// The extended flag of the header is set automatically when `T` is an extended
-    /// record type, so callers never need to manage it by hand.
+    /// The extended and counted flags of the header are set automatically to match
+    /// the record type `T`, so callers never need to manage them by hand.
     ///
     /// # Arguments
     ///
@@ -120,7 +120,7 @@ impl<W: Write, T: IbuRecord> Writer<W, T> {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The header has the extended flag set but `T` is not an extended record type
+    /// - The header carries an extended or counted flag that `T` lacks
     /// - Writing the header to the sink fails
     ///
     /// # Examples
@@ -139,15 +139,16 @@ impl<W: Write, T: IbuRecord> Writer<W, T> {
     /// # }
     /// ```
     pub fn new(mut inner: W, mut header: Header) -> crate::Result<Self> {
-        // Stamp the extended flag to match the record type
+        // Stamp the extended/counted flags to match the record type. Flags the
+        // header already carries but the record type lacks are an error rather
+        // than being silently cleared.
         if T::EXTENDED {
             header.set_extended();
-        } else if header.extended() {
-            return Err(IbuError::ExtendedRecordMismatch {
-                is_ext: true,
-                ext_expected: false,
-            });
         }
+        if T::COUNTED {
+            header.set_counts();
+        }
+        header.matches_record_type::<T>()?;
 
         // Write header immediately
         let header_bytes: &[u8] = bytemuck::bytes_of(&header);
@@ -926,9 +927,46 @@ mod tests {
         let result: crate::Result<Writer<_, Record>> = Writer::new(buffer, header);
         assert!(matches!(
             result,
-            Err(crate::IbuError::ExtendedRecordMismatch {
-                is_ext: true,
-                ext_expected: false
+            Err(crate::IbuError::RecordTypeMismatch {
+                file_extended: true,
+                requested_extended: false,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_count_writer_sets_count_flag() {
+        use crate::RecordCount;
+
+        let header = Header::new(16, 12);
+        let buffer = Vec::new();
+        let mut writer: Writer<_, RecordCount> = Writer::new(buffer, header).unwrap();
+
+        let record = RecordCount::new(Record::new(1, 2, 3), 42);
+        writer.write_record(&record).unwrap();
+        writer.finish().unwrap();
+
+        let buffer = writer.into_inner();
+        let written_header = Header::from_bytes(&buffer[..32]);
+        assert!(written_header.counts());
+        assert!(!written_header.extended());
+        assert_eq!(buffer.len(), 32 + crate::RECORD_COUNT_SIZE);
+    }
+
+    #[test]
+    fn test_plain_writer_rejects_counted_header() {
+        let mut header = Header::new(16, 12);
+        header.set_counts();
+
+        let buffer = Vec::new();
+        let result: crate::Result<Writer<_, Record>> = Writer::new(buffer, header);
+        assert!(matches!(
+            result,
+            Err(crate::IbuError::RecordTypeMismatch {
+                file_counted: true,
+                requested_counted: false,
+                ..
             })
         ));
     }
