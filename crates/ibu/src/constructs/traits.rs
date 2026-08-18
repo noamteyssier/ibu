@@ -61,6 +61,9 @@ pub trait IbuRecord: Pod + Eq + Ord + Hash + Debug + Send + Sync {
     /// The 2-bit encoded UMI.
     fn umi(&self) -> u64;
 
+    /// Replaces the record's UMI (e.g. during UMI error correction).
+    fn set_umi(&mut self, umi: u64);
+
     /// The application-specific index value.
     fn index(&self) -> u64;
 

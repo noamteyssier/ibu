@@ -79,6 +79,11 @@ impl IbuRecord for RecordCount {
     }
 
     #[inline(always)]
+    fn set_umi(&mut self, umi: u64) {
+        self.record.umi = umi;
+    }
+
+    #[inline(always)]
     fn index(&self) -> u64 {
         self.record.index
     }
@@ -161,6 +166,11 @@ impl IbuRecord for ExtRecordCount {
     }
 
     #[inline(always)]
+    fn set_umi(&mut self, umi: u64) {
+        self.record.umi = umi;
+    }
+
+    #[inline(always)]
     fn index(&self) -> u64 {
         self.record.index
     }
@@ -225,6 +235,25 @@ mod tests {
         // uncounted records report a multiplicity of 1
         let record = Record::new(1, 2, 3);
         assert_eq!(IbuRecord::count(&record), 1);
+    }
+
+    #[test]
+    fn test_set_umi() {
+        let mut record = Record::new(1, 2, 3);
+        record.set_umi(9);
+        assert_eq!(record, Record::new(1, 9, 3));
+
+        let mut counted = RecordCount::new(Record::new(1, 2, 3), 42);
+        counted.set_umi(9);
+        assert_eq!(counted, RecordCount::new(Record::new(1, 9, 3), 42));
+
+        let mut ext = ExtRecord::from_sequence(1, 2, 3, b"ACGT").unwrap();
+        ext.set_umi(9);
+        assert_eq!(ext.umi, 9);
+
+        let mut ext_counted = ExtRecordCount::new(ext, 7);
+        ext_counted.set_umi(11);
+        assert_eq!(ext_counted.record.umi, 11);
     }
 
     #[test]
