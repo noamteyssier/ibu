@@ -51,7 +51,29 @@
 //!
 //! All record types implement the [`IbuRecord`] trait, so readers, writers, and
 //! downstream tooling (sorting, deduplication, parallel processing) can be written
-//! once, generic over the record type.
+//! once, generic over the record type. Runtime dispatch from a file header to the
+//! concrete record type is provided by the [`with_record_type!`] macro.
+//!
+//! ## Core Routines
+//!
+//! Beyond raw I/O, the crate ships the standard IBU processing routines so
+//! downstream tooling (including the `ibu-cli` binary) can compose them directly:
+//!
+//! - [`external_sort`]: on-disk merge sort of arbitrarily large record streams
+//!   (requires the `ext-sort` feature)
+//! - [`DedupExt::dedup`] / [`dedup_sorted`]: collapse sorted streams into counted
+//!   records
+//! - [`umi::correct_umis_parallel`]: parallel UMI error correction over sorted
+//!   streams, merging Hamming-distance-1 UMIs into their most abundant neighbor
+//! - [`consensus::consensus_parallel`]: parallel sequence consensus over sorted
+//!   extended streams, rewriting each (barcode, UMI, index) group's sequences
+//!   to the group's most abundant variant
+//!
+//! The two parallel routines are thin wrappers over
+//! [`barcode_set::process_barcode_sets_parallel`], which fans barcode sets out
+//! to worker threads and reassembles their output deterministically - new
+//! per-barcode transformations only need to supply the per-set processing
+//! function.
 //!
 //! ## Basic Usage
 //!
@@ -198,6 +220,8 @@
 //! # }
 //! ```
 
+pub mod barcode_set;
+pub mod consensus;
 mod constructs;
 mod dedup;
 mod error;
@@ -205,16 +229,50 @@ mod error;
 mod external_chunk;
 mod io;
 mod parallel;
+pub mod umi;
+
+/// Dispatches a generic function call over the record type described by a header.
+///
+/// IBU files are discriminated at runtime by two header flags (extended and
+/// counted), while record processing code is generic over [`IbuRecord`]. This
+/// macro bridges the two: it matches on the header's flags and invokes the given
+/// function with the corresponding concrete record type as its first type
+/// parameter.
+///
+/// # Examples
+///
+/// ```rust
+/// use ibu::{with_record_type, Header, IbuRecord};
+///
+/// fn record_size<T: IbuRecord>() -> usize {
+///     T::SIZE
+/// }
+///
+/// let mut header = Header::new(16, 12);
+/// header.set_extended();
+/// assert_eq!(with_record_type!(header, record_size()), 64);
+/// ```
+#[macro_export]
+macro_rules! with_record_type {
+    ($header:expr, $func:ident($($args:expr),* $(,)?)) => {
+        match ($header.extended(), $header.counts()) {
+            (false, false) => $func::<$crate::Record>($($args),*),
+            (false, true) => $func::<$crate::RecordCount>($($args),*),
+            (true, false) => $func::<$crate::ExtRecord>($($args),*),
+            (true, true) => $func::<$crate::ExtRecordCount>($($args),*),
+        }
+    };
+}
 
 pub use constructs::{
-    ExtRecord, ExtRecordBuffer, ExtRecordCount, Header, IbuRecord, Record, RecordCount,
-    EXTENDED_RECORD_COUNT_SIZE, EXT_RECORD_SIZE, HEADER_SIZE, MAGIC, MIN_VERSION,
-    RECORD_COUNT_SIZE, RECORD_SIZE, VERSION,
+    ExtIbuRecord, ExtRecord, ExtRecordBuffer, ExtRecordBufferAscii, ExtRecordCount, Header,
+    IbuRecord, Record, RecordCount, EXTENDED_RECORD_COUNT_SIZE, EXT_RECORD_SIZE, HEADER_SIZE,
+    MAGIC, MIN_VERSION, RECORD_COUNT_SIZE, RECORD_SIZE, VERSION,
 };
-pub use dedup::{dedup_sorted, DedupExt, DedupResults, DedupSorted};
+pub use dedup::{dedup_sorted, merge_counted_records, DedupExt, DedupResults, DedupSorted};
 pub use error::{IbuError, IntoIbuError, Result};
 #[cfg(feature = "ext-sort")]
-pub use external_chunk::IbuExternalChunk;
+pub use external_chunk::{external_sort, IbuExternalChunk};
 pub use io::{load_to_vec, MmapReader, Reader, Writer};
 pub use parallel::{ParallelProcessor, ParallelReader};
 

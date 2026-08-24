@@ -18,6 +18,7 @@ ext-sort = { workspace = true, optional = true }
 memmap2 = { workspace = true }
 niffler = { workspace = true, optional = true }
 num_cpus = { workspace = true }
+parking_lot = { workspace = true }
 serde = { workspace = true, optional = true }
 thiserror = { workspace = true }
 

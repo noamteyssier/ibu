@@ -1,9 +1,9 @@
 use std::io::Write;
 
 use anyhow::{Context, Result};
-use ibu::{ExtRecord, ExtRecordCount, Header, IbuRecord, Reader, Record, RecordCount};
+use ibu::{with_record_type, Header, IbuRecord, Reader};
 
-use crate::utils::{match_output, with_record_type, Input, Output};
+use crate::utils::{match_output, Input, Output};
 
 #[derive(clap::Parser, Debug)]
 pub struct ArgsView {
@@ -41,27 +41,6 @@ pub struct ArgsView {
     pub feature_col: usize,
 }
 
-/// Record-type specific presentation on top of [`IbuRecord`].
-trait ViewRecord: IbuRecord {
-    /// The decoded nucleotide sequence carried by the record, if any.
-    fn sequence(&self) -> Result<Option<String>> {
-        Ok(None)
-    }
-}
-impl ViewRecord for Record {}
-impl ViewRecord for RecordCount {}
-impl ViewRecord for ExtRecord {
-    fn sequence(&self) -> Result<Option<String>> {
-        let buf = self.decode_sequence()?;
-        Ok(Some(String::from_utf8(buf.seq().to_vec())?))
-    }
-}
-impl ViewRecord for ExtRecordCount {
-    fn sequence(&self) -> Result<Option<String>> {
-        self.record.sequence()
-    }
-}
-
 fn write_header<W: Write>(header: Header, writer: &mut W) -> Result<()> {
     writeln!(writer, "# IBU")?;
     writeln!(writer, "# version: {}", header.version)?;
@@ -91,7 +70,7 @@ fn load_features(path: Option<&String>, feature_col: usize) -> Result<Option<Vec
         .map(Some)
 }
 
-fn dump_records<T: ViewRecord>(
+fn dump_records<T: IbuRecord>(
     reader: Reader<Input>,
     args: &ArgsView,
     features: Option<&[String]>,
@@ -127,7 +106,8 @@ fn dump_records<T: ViewRecord>(
 
         // sequence column for extended records
         if let Some(seq) = record.sequence()? {
-            write!(writer, "\t{seq}")?;
+            writer.write_all(b"\t")?;
+            writer.write_all(seq.seq())?;
         }
 
         // count column for counted records

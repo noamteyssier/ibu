@@ -335,6 +335,7 @@ dependencies = [
  "memmap2",
  "niffler",
  "num_cpus",
+ "parking_lot",
  "rand",
  "serde",
  "thiserror 2.0.20",
@@ -349,7 +350,6 @@ dependencies = [
  "bytesize",
  "clap",
  "ibu",
- "parking_lot",
  "tempfile",
 ]
 

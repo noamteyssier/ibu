@@ -20,7 +20,6 @@ anyhow = { workspace = true }
 bitnuc = { workspace = true }
 bytesize = { workspace = true }
 clap = { workspace = true }
-parking_lot = "0.12.5"
 
 [dev-dependencies]
 tempfile = { workspace = true }

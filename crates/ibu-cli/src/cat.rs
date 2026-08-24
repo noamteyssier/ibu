@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
-use ibu::{Header, IbuRecord, Reader, Writer};
+use ibu::{with_record_type, Header, IbuRecord, Reader, Writer};
 
-use crate::utils::{match_output, with_record_type, Input, Output};
+use crate::utils::{match_output, Input, Output};
 
 #[derive(clap::Parser, Debug)]
 pub struct ArgsCat {

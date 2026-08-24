@@ -2,10 +2,12 @@ use std::str::FromStr;
 
 use anyhow::{bail, Context, Result};
 use bytesize::ByteSize;
-use ibu::ext_sort::{ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
-use ibu::{dedup_sorted, DedupExt, Header, IbuError, IbuExternalChunk, IbuRecord, Reader, Writer};
+use ibu::{
+    dedup_sorted, external_sort, with_record_type, DedupExt, Header, IbuError, IbuRecord, Reader,
+    Writer,
+};
 
-use crate::utils::{match_output, with_record_type, Input, Output};
+use crate::utils::{match_output, Input, Output};
 
 /// Default memory limit per sort operation (5GiB)
 const DEFAULT_MEMORY_LIMIT: u64 = 5;
@@ -101,17 +103,8 @@ fn sort_typed<T: IbuRecord>(args: &ArgsSort, reader: Reader<Input>, output: Outp
             ByteSize::from_str(&args.memory_limit).unwrap_or(ByteSize::gib(DEFAULT_MEMORY_LIMIT));
         let chunk_size = (memory_limit.as_u64() / T::SIZE as u64) as usize;
 
-        // Build the external sorter with a count-limited buffer and raw-Pod chunks
-        let sorter: ExternalSorter<T, IbuError, LimitedBufferBuilder, IbuExternalChunk<T>> =
-            ExternalSorterBuilder::new()
-                .with_buffer(LimitedBufferBuilder::new(chunk_size, false))
-                .with_threads_number(args.threads)
-                .build()
-                .context("Failed to build external sorter")?;
-
-        // Sort the records using external sort
-        let merger = sorter
-            .sort(records)
+        // Sort the records with an on-disk merge sort
+        let merger = external_sort(records, chunk_size, args.threads)
             .context("Failed to sort with external sort")?;
 
         if args.dedup {

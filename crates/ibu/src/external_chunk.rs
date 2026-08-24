@@ -90,6 +90,58 @@ impl<T: IbuRecord> Iterator for IbuExternalChunk<T> {
     }
 }
 
+/// Externally sorts a record stream, spilling chunks to temporary files.
+///
+/// Wraps [`ext_sort`]'s machinery with [`IbuExternalChunk`] raw-Pod spill files,
+/// returning an iterator over the merged, sorted records. The result composes
+/// directly with [`DedupExt::dedup`](crate::DedupExt::dedup) for
+/// sort-and-deduplicate pipelines.
+///
+/// # Arguments
+///
+/// * `records` - The (fallible) record stream to sort
+/// * `chunk_records` - Number of records buffered in memory per spill chunk
+/// * `threads` - Number of threads used for chunk sorting
+///
+/// # Examples
+///
+/// ```rust
+/// use ibu::{external_sort, DedupExt, Record, RecordCount};
+///
+/// # fn main() -> anyhow::Result<()> {
+/// let records = (0..1000u64).rev().map(|i| Ok(Record::new(i % 10, i % 7, 0)));
+///
+/// let counted: Vec<RecordCount> = external_sort(records, 100, 1)?
+///     .dedup()
+///     .collect::<Result<_, _>>()?;
+///
+/// let total: u64 = counted.iter().map(|c| c.count).sum();
+/// assert_eq!(total, 1000);
+/// # Ok(())
+/// # }
+/// ```
+pub fn external_sort<T, I>(
+    records: I,
+    chunk_records: usize,
+    threads: usize,
+) -> crate::Result<impl Iterator<Item = Result<T, IbuError>>>
+where
+    T: IbuRecord,
+    I: IntoIterator<Item = Result<T, IbuError>>,
+{
+    use crate::IntoIbuError;
+    use ext_sort::{ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
+
+    let sorter: ExternalSorter<T, IbuError, LimitedBufferBuilder, IbuExternalChunk<T>> =
+        ExternalSorterBuilder::new()
+            .with_buffer(LimitedBufferBuilder::new(chunk_records.max(1), false))
+            .with_threads_number(threads.max(1))
+            .build()
+            .map_err(IntoIbuError::into_ibu_error)?;
+
+    sorter.sort(records).map_err(IntoIbuError::into_ibu_error)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

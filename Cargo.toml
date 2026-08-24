@@ -24,6 +24,7 @@ ext-sort = "0.1.5"
 memmap2 = "0.9.9"
 niffler = "3.0.0"
 num_cpus = "1.17.0"
+parking_lot = "0.12.5"
 rand = "0.9.2"
 serde = { version = "1.0.228", features = ["derive"] }
 tempfile = "3.23.0"

@@ -1,6 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 
-use crate::{ExtRecord, IbuRecord, Record};
+use crate::{ExtIbuRecord, ExtRecord, ExtRecordBuffer, IbuRecord, Record};
 
 pub const RECORD_COUNT_SIZE: usize = std::mem::size_of::<RecordCount>();
 pub const EXTENDED_RECORD_COUNT_SIZE: usize = std::mem::size_of::<ExtRecordCount>();
@@ -94,6 +94,11 @@ impl IbuRecord for RecordCount {
     }
 
     #[inline(always)]
+    fn set_count(&mut self, count: u64) {
+        self.count = count;
+    }
+
+    #[inline(always)]
     fn same_key(&self, other: &Self) -> bool {
         self.record == other.record
     }
@@ -181,6 +186,11 @@ impl IbuRecord for ExtRecordCount {
     }
 
     #[inline(always)]
+    fn set_count(&mut self, count: u64) {
+        self.count = count;
+    }
+
+    #[inline(always)]
     fn same_key(&self, other: &Self) -> bool {
         self.record == other.record
     }
@@ -188,6 +198,27 @@ impl IbuRecord for ExtRecordCount {
     #[inline(always)]
     fn to_counted(&self, count: u64) -> Self::Counted {
         Self::new(self.record, count)
+    }
+
+    fn sequence(&self) -> crate::Result<Option<crate::ExtRecordBufferAscii>> {
+        self.record.sequence()
+    }
+}
+
+impl ExtIbuRecord for ExtRecordCount {
+    #[inline(always)]
+    fn seq_len(&self) -> u64 {
+        self.record.seq_len
+    }
+
+    #[inline(always)]
+    fn seq_buf(&self) -> &ExtRecordBuffer {
+        &self.record.seq_buf
+    }
+
+    #[inline(always)]
+    fn set_seq(&mut self, seq_len: u64, seq_buf: ExtRecordBuffer) {
+        self.record.set_seq(seq_len, seq_buf);
     }
 }
 
@@ -254,6 +285,23 @@ mod tests {
         let mut ext_counted = ExtRecordCount::new(ext, 7);
         ext_counted.set_umi(11);
         assert_eq!(ext_counted.record.umi, 11);
+    }
+
+    #[test]
+    fn test_set_count() {
+        let mut counted = RecordCount::new(Record::new(1, 2, 3), 42);
+        counted.set_count(7);
+        assert_eq!(counted.count, 7);
+
+        let mut ext_counted =
+            ExtRecordCount::new(ExtRecord::from_sequence(1, 2, 3, b"ACGT").unwrap(), 42);
+        ext_counted.set_count(7);
+        assert_eq!(ext_counted.count, 7);
+
+        // no-op for uncounted record types
+        let mut record = Record::new(1, 2, 3);
+        record.set_count(7);
+        assert_eq!(IbuRecord::count(&record), 1);
     }
 
     #[test]
