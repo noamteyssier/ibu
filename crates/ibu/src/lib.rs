@@ -68,6 +68,9 @@
 //! - [`consensus::consensus_parallel`]: parallel sequence consensus over sorted
 //!   extended streams, rewriting each (barcode, UMI, index) group's sequences
 //!   to the group's most abundant variant
+//! - [`count::BarcodeUmiCounter`]: unique-UMI counting over sorted streams,
+//!   attributing each (barcode, UMI) group to its most abundant index - and,
+//!   for extended records, to its most abundant sequence variant
 //!
 //! The two parallel routines are thin wrappers over
 //! [`barcode_set::process_barcode_sets_parallel`], which fans barcode sets out
@@ -223,6 +226,7 @@
 pub mod barcode_set;
 pub mod consensus;
 mod constructs;
+pub mod count;
 mod dedup;
 mod error;
 #[cfg(feature = "ext-sort")]
@@ -266,8 +270,8 @@ macro_rules! with_record_type {
 
 pub use constructs::{
     ExtIbuRecord, ExtRecord, ExtRecordBuffer, ExtRecordBufferAscii, ExtRecordCount, Header,
-    IbuRecord, Record, RecordCount, EXTENDED_RECORD_COUNT_SIZE, EXT_RECORD_SIZE, HEADER_SIZE,
-    MAGIC, MIN_VERSION, RECORD_COUNT_SIZE, RECORD_SIZE, VERSION,
+    IbuRecord, Record, RecordCount, SeqKey, EXTENDED_RECORD_COUNT_SIZE, EXT_RECORD_SIZE,
+    HEADER_SIZE, MAGIC, MIN_VERSION, RECORD_COUNT_SIZE, RECORD_SIZE, VERSION,
 };
 pub use dedup::{dedup_sorted, merge_counted_records, DedupExt, DedupResults, DedupSorted};
 pub use error::{IbuError, IntoIbuError, Result};

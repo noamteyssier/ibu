@@ -143,6 +143,13 @@ pub enum IbuError {
     #[error("Found an unsorted IBU record when expecting sorted")]
     ExpectingSortedIbu,
 
+    /// A record's index exceeds the caller-provided maximum.
+    ///
+    /// Raised during UMI counting when a record's index falls outside the
+    /// provided feature list - usually a sign of a mismatched feature file.
+    #[error("Record index ({index}) exceeds the maximum expected index ({max_index}) - likely an incorrect feature list")]
+    IndexExceedsMax { index: u64, max_index: u64 },
+
     /// Error occurred during parallel processing.
     ///
     /// This wraps errors that occur in user-defined parallel processors,

@@ -7,7 +7,7 @@
 //! (barcode, UMI, index) group, every record's sequence is rewritten to the
 //! group's most abundant variant - measured in reads (summed record
 //! multiplicities), with ties broken to the first variant in sorted order - so
-//! each triple is associated with exactly one `(seq_len, seq_buf)`.
+//! each triple is associated with exactly one [`SeqKey`](crate::SeqKey).
 //!
 //! Consolidation always preserves read multiplicities and sortedness. Counted
 //! streams additionally stay deduplicated: records left sharing a payload
@@ -130,11 +130,10 @@ pub fn consensus_group<T: ExtIbuRecord>(group: &mut [T]) -> usize {
     }
 
     // Rewrite every non-consensus record to the consensus variant
-    let (seq_len, seq_buf) = best_key;
     let mut n_consolidated = 0;
     for record in group.iter_mut() {
         if record.seq_key() != best_key {
-            record.set_seq(seq_len, seq_buf);
+            record.set_seq(best_key.len, best_key.seq);
             n_consolidated += record.count() as usize;
         }
     }

@@ -76,6 +76,18 @@ pub trait IbuRecord: Pod + Eq + Ord + Hash + Debug + Send + Sync {
         Ok(None)
     }
 
+    /// The 2-bit packed sequence key carried by the record, if any.
+    ///
+    /// Returns `None` for record types without a sequence payload; extended
+    /// types return [`ExtIbuRecord::seq_key`]. This mirrors
+    /// [`sequence`](IbuRecord::sequence) so sequence-aware aggregation (e.g.
+    /// [UMI counting](crate::count)) can be written generically over all
+    /// record types.
+    #[inline(always)]
+    fn opt_seq_key(&self) -> Option<crate::SeqKey> {
+        None
+    }
+
     /// The multiplicity of this record.
     ///
     /// Returns the stored count for counted record types and `1` for uncounted
@@ -127,10 +139,13 @@ pub trait ExtIbuRecord: IbuRecord {
     /// [`ExtRecord`](crate::ExtRecord)).
     fn set_seq(&mut self, seq_len: u64, seq_buf: crate::ExtRecordBuffer);
 
-    /// The packed sequence as a `(seq_len, seq_buf)` pair - the equivalence
+    /// The packed sequence as a [`SeqKey`](crate::SeqKey) - the equivalence
     /// used when grouping sequence variants.
     #[inline(always)]
-    fn seq_key(&self) -> (u64, crate::ExtRecordBuffer) {
-        (self.seq_len(), *self.seq_buf())
+    fn seq_key(&self) -> crate::SeqKey {
+        crate::SeqKey {
+            len: self.seq_len(),
+            seq: *self.seq_buf(),
+        }
     }
 }
