@@ -78,6 +78,40 @@
 //! per-barcode transformations only need to supply the per-set processing
 //! function.
 //!
+//! ### Composable Pipelines
+//!
+//! Every routine also composes over iterators, so whole pipelines chain
+//! in memory without intermediate files. [`external_sort`] and
+//! [`DedupExt::dedup`] are iterator adapters already; the parallel routines
+//! have iterator counterparts ([`umi::correct_umis_parallel_iter`],
+//! [`consensus::consensus_parallel_iter`], and the generic
+//! [`barcode_set::process_barcode_sets_parallel_iter`]) that yield the
+//! processed records as a sorted stream, backed by the same deterministic
+//! worker pool. Terminate a pipeline with
+//! [`count::BarcodeUmiCounter::consume`] or [`Writer::write_iter`]:
+//!
+//! ```rust
+//! use ibu::consensus::consensus_parallel_iter;
+//! use ibu::count::BarcodeUmiCounter;
+//! use ibu::umi::correct_umis_parallel_iter;
+//! use ibu::{external_sort, DedupExt, ExtRecord};
+//!
+//! # fn main() -> ibu::Result<()> {
+//! // An unsorted fallible stream, e.g. Reader::from_path("x.ibu")?.iter_ext_records()?
+//! let records = (0..1000u64)
+//!     .rev()
+//!     .map(|i| ExtRecord::from_sequence(i % 10, i % 7, i % 3, b"ACGTACGT"));
+//!
+//! let sorted = external_sort(records, 100_000, 4)?.dedup();
+//! let corrected = correct_umis_parallel_iter(sorted, 12, 4);
+//! let consensus = consensus_parallel_iter(corrected, 4);
+//! let counts = BarcodeUmiCounter::new().consume(consensus)?;
+//!
+//! assert_eq!(counts.stats().reads, 1000);
+//! # Ok(())
+//! # }
+//! ```
+//!
 //! ## Basic Usage
 //!
 //! ### Writing and Reading Records

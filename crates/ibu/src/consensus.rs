@@ -16,10 +16,11 @@
 //! so pipe the output through [`dedup_sorted`](crate::dedup_sorted) to collapse
 //! them into counted form.
 //!
-//! The main entry point is [`consensus_parallel`], which drives an entire
-//! reader-to-writer consolidation. The building blocks ([`consensus_group`],
-//! [`consensus_barcode_set`]) are public so custom pipelines can compose them
-//! differently.
+//! The main entry points are [`consensus_parallel`], which drives an entire
+//! reader-to-writer consolidation, and [`consensus_parallel_iter`], its
+//! iterator counterpart for composable pipelines. The building blocks
+//! ([`consensus_group`], [`consensus_barcode_set`]) are public so custom
+//! pipelines can compose them differently.
 //!
 //! # Examples
 //!
@@ -54,8 +55,10 @@
 use std::io::{Read, Write};
 use std::ops::AddAssign;
 
-use crate::barcode_set::process_barcode_sets_parallel;
-use crate::{merge_counted_records, ExtIbuRecord, Reader, Writer};
+use crate::barcode_set::{
+    process_barcode_sets_parallel, process_barcode_sets_parallel_iter, ParallelBarcodeSets,
+};
+use crate::{merge_counted_records, ExtIbuRecord, IbuError, Reader, Writer};
 
 /// Statistics of a consensus consolidation pass.
 ///
@@ -215,6 +218,81 @@ where
         total: stats.total,
         consolidated: stats.modified,
     })
+}
+
+/// Consolidates sequence variants across an entire sorted extended record
+/// stream in parallel, yielding the consolidated records as a sorted stream.
+///
+/// The iterator counterpart of [`consensus_parallel`], for composing pipelines
+/// without intermediate files: it accepts any fallible record iterator (a
+/// [`Reader`](crate::Reader) iterator, an
+/// [`external_sort`](crate::external_sort) merger, a
+/// [`dedup`](crate::DedupExt::dedup) adapter, ...) and yields a stream with the
+/// same guarantees as the reader-to-writer version - sorted, deterministic
+/// across thread counts, and deduplicated for counted record types.
+///
+/// Consolidation statistics are available from the returned iterator via
+/// [`ConsensusIter::stats`] once the stream is exhausted.
+///
+/// # Examples
+///
+/// ```rust
+/// use ibu::consensus::consensus_parallel_iter;
+/// use ibu::{ExtIbuRecord, ExtRecord};
+///
+/// # fn main() -> ibu::Result<()> {
+/// // A sorted stream where a rare variant (ACGG) neighbors a dominant one (ACGT)
+/// let records = vec![
+///     ExtRecord::from_sequence(1, 2, 0, b"ACGG")?,
+///     ExtRecord::from_sequence(1, 2, 0, b"ACGT")?,
+///     ExtRecord::from_sequence(1, 2, 0, b"ACGT")?,
+/// ];
+///
+/// let mut consolidated = consensus_parallel_iter(records.into_iter().map(Ok), 1);
+/// let records: Vec<ExtRecord> = consolidated.by_ref().collect::<Result<_, _>>()?;
+///
+/// assert!(records
+///     .iter()
+///     .all(|r| r.decode_sequence().unwrap().seq() == b"ACGT"));
+/// assert_eq!(consolidated.stats().consolidated, 1);
+/// # Ok(())
+/// # }
+/// ```
+pub fn consensus_parallel_iter<T, I>(records: I, threads: usize) -> ConsensusIter<T>
+where
+    T: ExtIbuRecord,
+    I: Iterator<Item = Result<T, IbuError>> + Send + 'static,
+{
+    ConsensusIter {
+        inner: process_barcode_sets_parallel_iter(records, threads, |barcode_set| {
+            Ok(consensus_barcode_set(barcode_set))
+        }),
+    }
+}
+
+/// Sorted consolidated-record stream returned by [`consensus_parallel_iter`].
+pub struct ConsensusIter<T: ExtIbuRecord> {
+    inner: ParallelBarcodeSets<T>,
+}
+
+impl<T: ExtIbuRecord> ConsensusIter<T> {
+    /// Statistics of the consolidation so far; final once the stream is
+    /// exhausted.
+    pub fn stats(&self) -> ConsensusStats {
+        let stats = self.inner.stats();
+        ConsensusStats {
+            total: stats.total,
+            consolidated: stats.modified,
+        }
+    }
+}
+
+impl<T: ExtIbuRecord> Iterator for ConsensusIter<T> {
+    type Item = crate::Result<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
 }
 
 #[cfg(test)]
