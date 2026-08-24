@@ -97,8 +97,7 @@ Beyond basic I/O, the library provides:
 
 - Memory-mapped reading with multi-threaded parallel processing (`MmapReader`, `ParallelProcessor`)
 - Transparent gzip/zstd compression via [niffler](https://crates.io/crates/niffler)
-- External sorting, deduplication, UMI correction, sequence consensus, and UMI counting —
-  the same routines backing the CLI
+- External sorting, deduplication, UMI correction, sequence consensus, and UMI counting as composable routines.
 - Runtime dispatch from a file header to its concrete record type (`with_record_type!`)
 
 See the [documentation](https://docs.rs/ibu/latest/ibu/) for details and examples.
