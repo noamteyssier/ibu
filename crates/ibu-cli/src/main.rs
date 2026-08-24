@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 mod cat;
+mod consensus;
 mod sort;
 mod umi;
 mod utils;
@@ -30,6 +31,12 @@ enum Command {
     ///
     /// Expects a sorted IBU file as input
     Umi(umi::ArgsUmi),
+
+    /// Consolidate the sequences of each (barcode, UMI, index) group to the
+    /// group's most abundant variant
+    ///
+    /// Expects a sorted extended IBU file as input
+    Consensus(consensus::ArgsConsensus),
 }
 
 fn run() -> Result<()> {
@@ -38,6 +45,7 @@ fn run() -> Result<()> {
         Command::Cat(args) => cat::run(&args),
         Command::Sort(args) => sort::run(&args),
         Command::Umi(args) => umi::run(&args),
+        Command::Consensus(args) => consensus::run(&args),
     }
 }
 

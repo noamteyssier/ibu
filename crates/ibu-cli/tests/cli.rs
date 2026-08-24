@@ -344,6 +344,158 @@ fn test_umi_correction_rejects_unsorted() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("unsorted"));
 }
 
+/// Sorted extended records where each (barcode, UMI) group has a dominant
+/// sequence plus a rare variant that should be consolidated into it.
+fn consensus_variant_records() -> Vec<ExtRecord> {
+    let mut records = Vec::new();
+    for barcode in 0..50u64 {
+        for umi in 0..4u64 {
+            for _ in 0..10 {
+                records.push(ExtRecord::from_sequence(barcode, umi, 0, b"ACGT").unwrap());
+            }
+            records.push(ExtRecord::from_sequence(barcode, umi, 0, b"ACGG").unwrap());
+        }
+    }
+    records.sort_unstable();
+    records
+}
+
+#[test]
+fn test_consensus() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    let derived = dir.path().join("in.consensus.ibu");
+    write_records(&input, &consensus_variant_records());
+
+    let out = ibu_bin().arg("consensus").arg(&input).output().unwrap();
+    assert!(out.status.success());
+
+    // stats JSON lands on stderr: 200 of 2200 reads consolidated
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("\"total\": 2200"), "stderr: {stderr}");
+    assert!(stderr.contains("\"consolidated\": 200"), "stderr: {stderr}");
+
+    let reader = Reader::new(std::fs::File::open(&derived).unwrap()).unwrap();
+    assert!(reader.header().sorted());
+    let records: Vec<ExtRecord> = reader
+        .iter_ext_records()
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(records.len(), 2200);
+    assert!(
+        records.windows(2).all(|w| w[0] <= w[1]),
+        "output not sorted"
+    );
+    assert!(
+        records
+            .iter()
+            .all(|r| r.decode_sequence().unwrap().seq() == b"ACGT"),
+        "unconsolidated sequence variants remain"
+    );
+}
+
+#[test]
+fn test_consensus_threaded_matches_single() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    let single = dir.path().join("single.ibu");
+    let threaded = dir.path().join("threaded.ibu");
+    write_records(&input, &consensus_variant_records());
+
+    for (output, threads) in [(&single, "1"), (&threaded, "4")] {
+        let status = ibu_bin()
+            .arg("consensus")
+            .arg(&input)
+            .arg("-o")
+            .arg(output)
+            .args(["-T", threads])
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    // ticketed writer keeps output deterministic across thread counts
+    assert_eq!(
+        std::fs::read(&single).unwrap(),
+        std::fs::read(&threaded).unwrap()
+    );
+}
+
+#[test]
+fn test_consensus_counted_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    let output = dir.path().join("out.ibu");
+
+    // the ACGT variant has more rows but fewer reads - counts decide abundance
+    let records = vec![
+        ExtRecord::from_sequence(0, 0, 0, b"ACGG")
+            .unwrap()
+            .to_counted(100),
+        ExtRecord::from_sequence(0, 0, 0, b"ACGT")
+            .unwrap()
+            .to_counted(2),
+        ExtRecord::from_sequence(0, 0, 0, b"ACGT")
+            .unwrap()
+            .to_counted(3),
+    ];
+    write_records(&input, &records);
+
+    let out = ibu_bin()
+        .arg("consensus")
+        .arg(&input)
+        .arg("-o")
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("\"total\": 105"), "stderr: {stderr}");
+    assert!(stderr.contains("\"consolidated\": 5"), "stderr: {stderr}");
+
+    let reader = Reader::new(std::fs::File::open(&output).unwrap()).unwrap();
+    assert!(reader.header().counts());
+    let consolidated: Vec<_> = reader
+        .iter_ext_record_counts()
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert!(consolidated
+        .iter()
+        .all(|r| r.record.decode_sequence().unwrap().seq() == b"ACGG"));
+    let total: u64 = consolidated.iter().map(|r| r.count).sum();
+    assert_eq!(total, 105);
+}
+
+#[test]
+fn test_consensus_rejects_unsorted() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    write_records(
+        &input,
+        &[
+            ExtRecord::from_sequence(5, 0, 0, b"ACGT").unwrap(),
+            ExtRecord::from_sequence(1, 0, 0, b"ACGT").unwrap(),
+        ],
+    );
+
+    let out = ibu_bin().arg("consensus").arg(&input).output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("unsorted"));
+}
+
+#[test]
+fn test_consensus_rejects_classic_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    write_records(&input, &[Record::new(0, 0, 0)]);
+
+    let out = ibu_bin().arg("consensus").arg(&input).output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("extended"));
+}
+
 #[test]
 fn test_sort_pipe_roundtrip() {
     use std::io::Write as _;
