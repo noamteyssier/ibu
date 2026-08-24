@@ -3,7 +3,7 @@ use std::io::Write;
 use anyhow::{Context, Result};
 use ibu::{with_record_type, Header, IbuRecord, Reader};
 
-use crate::utils::{match_output, Input, Output};
+use crate::utils::{load_features, match_output, Input, Output};
 
 #[derive(clap::Parser, Debug)]
 pub struct ArgsView {
@@ -50,24 +50,6 @@ fn write_header<W: Write>(header: Header, writer: &mut W) -> Result<()> {
     writeln!(writer, "# is_extended: {}", header.extended())?;
     writeln!(writer, "# is_counted: {}", header.counts())?;
     Ok(())
-}
-
-fn load_features(path: Option<&String>, feature_col: usize) -> Result<Option<Vec<String>>> {
-    let Some(path) = path else {
-        return Ok(None);
-    };
-    let features = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read feature file: {path}"))?;
-    features
-        .lines()
-        .map(|line| {
-            line.split_whitespace()
-                .nth(feature_col)
-                .map(String::from)
-                .with_context(|| format!("Missing feature column {feature_col} in line: {line}"))
-        })
-        .collect::<Result<Vec<_>>>()
-        .map(Some)
 }
 
 fn dump_records<T: IbuRecord>(

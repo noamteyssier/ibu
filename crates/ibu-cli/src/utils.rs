@@ -17,3 +17,23 @@ pub fn match_output(path: Option<&String>) -> Result<Output> {
         Ok(Box::new(BufWriter::new(stdout())))
     }
 }
+
+/// Loads the selected column of a whitespace-delimited feature file, one
+/// feature name per index line.
+pub fn load_features(path: Option<&String>, feature_col: usize) -> Result<Option<Vec<String>>> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let features = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read feature file: {path}"))?;
+    features
+        .lines()
+        .map(|line| {
+            line.split_whitespace()
+                .nth(feature_col)
+                .map(String::from)
+                .with_context(|| format!("Missing feature column {feature_col} in line: {line}"))
+        })
+        .collect::<Result<Vec<_>>>()
+        .map(Some)
+}

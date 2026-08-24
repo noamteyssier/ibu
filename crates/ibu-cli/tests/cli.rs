@@ -530,3 +530,306 @@ fn test_sort_pipe_roundtrip() {
     assert_eq!(sorted.len(), records.len());
     assert!(sorted.windows(2).all(|w| w[0] <= w[1]));
 }
+
+/// A sorted record set with a known UMI structure:
+/// barcode 0 holds two UMIs on index 0 (one duplicated) and one on index 1;
+/// barcode 1 holds one UMI on index 1.
+fn count_records() -> Vec<Record> {
+    vec![
+        Record::new(0, 0, 0),
+        Record::new(0, 0, 0),
+        Record::new(0, 1, 0),
+        Record::new(0, 2, 1),
+        Record::new(1, 0, 1),
+    ]
+}
+
+fn read_to_string(path: &Path) -> String {
+    std::fs::read_to_string(path).unwrap()
+}
+
+#[test]
+fn test_count() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    let output = dir.path().join("counts.tsv");
+    let log = dir.path().join("stats.json");
+    write_records(&input, &count_records());
+
+    let status = ibu_bin()
+        .arg("count")
+        .arg(&input)
+        .arg("-o")
+        .arg(&output)
+        .arg("-l")
+        .arg(&log)
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    assert_eq!(read_to_string(&output), "0\t0\t2\n0\t1\t1\n1\t1\t1\n");
+
+    let stats = read_to_string(&log);
+    assert!(stats.contains("\"reads\": 5"));
+    assert!(stats.contains("\"umis\": 4"));
+    assert!(stats.contains("\"counted\": 4"));
+    assert!(stats.contains("\"tied\": 0"));
+}
+
+#[test]
+fn test_count_decode_suffix() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    let output = dir.path().join("counts.tsv");
+    write_records(&input, &count_records());
+
+    let status = ibu_bin()
+        .arg("count")
+        .arg(&input)
+        .arg("-o")
+        .arg(&output)
+        .args(["--decode", "--suffix", "1"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    // barcode 0 decodes to 16 A's (bc_len=16); barcode 1 has a trailing C
+    assert_eq!(
+        read_to_string(&output),
+        "AAAAAAAAAAAAAAAA-1\t0\t2\n\
+         AAAAAAAAAAAAAAAA-1\t1\t1\n\
+         CAAAAAAAAAAAAAAA-1\t1\t1\n"
+    );
+}
+
+#[test]
+fn test_count_counted_records_weigh_by_multiplicity() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    let output = dir.path().join("counts.tsv");
+    // one UMI split across two indices: the stored counts break the tie
+    write_records(
+        &input,
+        &[
+            RecordCount::new(Record::new(0, 0, 0), 5),
+            RecordCount::new(Record::new(0, 0, 1), 2),
+        ],
+    );
+
+    let status = ibu_bin()
+        .arg("count")
+        .arg(&input)
+        .arg("-o")
+        .arg(&output)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert_eq!(read_to_string(&output), "0\t0\t1\n");
+}
+
+#[test]
+fn test_count_features_and_aggregation() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    let features = dir.path().join("features.tsv");
+    let output = dir.path().join("counts.tsv");
+    write_records(&input, &count_records());
+    std::fs::write(&features, "p0\tgA\np1\tgB\n").unwrap();
+
+    // feature column 0: per-probe names
+    let status = ibu_bin()
+        .arg("count")
+        .arg(&input)
+        .arg("-o")
+        .arg(&output)
+        .arg("-f")
+        .arg(&features)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert_eq!(read_to_string(&output), "0\tp0\t2\n0\tp1\t1\n1\tp1\t1\n");
+
+    // aggregating on column 1 with distinct names is a no-op relabeling
+    let status = ibu_bin()
+        .arg("count")
+        .arg(&input)
+        .arg("-o")
+        .arg(&output)
+        .arg("-f")
+        .arg(&features)
+        .args(["-C", "1"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert_eq!(read_to_string(&output), "0\tgA\t2\n0\tgB\t1\n1\tgB\t1\n");
+
+    // aggregating probes sharing a name merges their counts
+    std::fs::write(&features, "p0\tgA\np1\tgA\n").unwrap();
+    let status = ibu_bin()
+        .arg("count")
+        .arg(&input)
+        .arg("-o")
+        .arg(&output)
+        .arg("-f")
+        .arg(&features)
+        .args(["-C", "1"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert_eq!(read_to_string(&output), "0\tgA\t3\n1\tgA\t1\n");
+}
+
+#[test]
+fn test_count_rejects_index_outside_features() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    let features = dir.path().join("features.tsv");
+    write_records(&input, &count_records());
+    // only one feature, but records carry index 1
+    std::fs::write(&features, "p0\n").unwrap();
+
+    let out = ibu_bin()
+        .arg("count")
+        .arg(&input)
+        .arg("-f")
+        .arg(&features)
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("exceeds the maximum expected index"));
+}
+
+fn read_gzip_to_string(path: &Path) -> String {
+    use std::io::Read as _;
+    let (mut reader, _format) = niffler::from_path(path).unwrap();
+    let mut contents = String::new();
+    reader.read_to_string(&mut contents).unwrap();
+    contents
+}
+
+#[test]
+fn test_count_mtx() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    let features = dir.path().join("features.tsv");
+    let outdir = dir.path().join("mtx");
+    write_records(&input, &count_records());
+    std::fs::write(&features, "p0\np1\n").unwrap();
+
+    let status = ibu_bin()
+        .arg("count")
+        .arg(&input)
+        .arg("-o")
+        .arg(&outdir)
+        .arg("-f")
+        .arg(&features)
+        .arg("--mtx")
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    assert_eq!(
+        read_gzip_to_string(&outdir.join("features.tsv.gz")),
+        "p0\np1\n"
+    );
+    assert_eq!(
+        read_gzip_to_string(&outdir.join("barcodes.tsv.gz")),
+        "AAAAAAAAAAAAAAAA\nCAAAAAAAAAAAAAAA\n"
+    );
+
+    let mtx = read_gzip_to_string(&outdir.join("matrix.mtx.gz"));
+    let lines: Vec<&str> = mtx.lines().collect();
+    assert!(lines[0].starts_with("%%MatrixMarket"));
+    assert_eq!(lines[2], "2 2 3"); // features, barcodes, non-zero entries
+    assert_eq!(&lines[3..], ["1 1 2", "2 1 1", "2 2 1"]);
+}
+
+#[test]
+fn test_count_mtx_requires_output_and_features() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    write_records(&input, &count_records());
+
+    let out = ibu_bin()
+        .arg("count")
+        .arg(&input)
+        .arg("--mtx")
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+}
+
+#[test]
+fn test_count_seq_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    let output = dir.path().join("counts.tsv");
+    let seq_output = dir.path().join("seq_counts.tsv");
+    // three UMIs on (barcode 0, index 0): two carry ACGT, one carries AGGT
+    write_records(
+        &input,
+        &[
+            ExtRecord::from_sequence(0, 0, 0, b"ACGT").unwrap(),
+            ExtRecord::from_sequence(0, 0, 0, b"ACGT").unwrap(),
+            ExtRecord::from_sequence(0, 1, 0, b"AGGT").unwrap(),
+            ExtRecord::from_sequence(0, 2, 0, b"ACGT").unwrap(),
+        ],
+    );
+
+    let status = ibu_bin()
+        .arg("count")
+        .arg(&input)
+        .arg("-o")
+        .arg(&output)
+        .arg("-q")
+        .arg(&seq_output)
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    assert_eq!(read_to_string(&output), "0\t0\t3\n");
+    assert_eq!(
+        read_to_string(&seq_output),
+        "0\t0\tACGT\t2\n0\t0\tAGGT\t1\n"
+    );
+}
+
+#[test]
+fn test_count_seq_output_rejects_classic_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    let seq_output = dir.path().join("seq_counts.tsv");
+    write_records(&input, &count_records());
+
+    let out = ibu_bin()
+        .arg("count")
+        .arg(&input)
+        .arg("-q")
+        .arg(&seq_output)
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("extended"));
+}
+
+#[test]
+fn test_count_rejects_unsorted() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    write_records(&input, &[Record::new(5, 0, 0), Record::new(1, 0, 0)]);
+
+    let out = ibu_bin().arg("count").arg(&input).output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("unsorted"));
+}
+
+#[test]
+fn test_count_rejects_empty_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.ibu");
+    write_records::<Record>(&input, &[]);
+
+    let out = ibu_bin().arg("count").arg(&input).output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("No records found"));
+}
