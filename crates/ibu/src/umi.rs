@@ -5,7 +5,9 @@
 //! merged (transitively, via connected components) into their most abundant
 //! neighbor, correcting sequencing errors in the UMI. Abundance is measured in
 //! reads (summed record multiplicities), so counted records weigh by their
-//! stored counts.
+//! stored counts. Counted streams also stay deduplicated: records left sharing
+//! a payload after correction are merged with
+//! [`merge_counted_records`](crate::merge_counted_records).
 //!
 //! The main entry point is [`correct_umis_parallel`], which drives an entire
 //! reader-to-writer correction over the shared
@@ -47,7 +49,7 @@ use std::io::{Read, Write};
 use std::ops::AddAssign;
 
 use crate::barcode_set::process_barcode_sets_parallel;
-use crate::{IbuRecord, IntoIbuError, Reader, Writer};
+use crate::{merge_counted_records, IbuRecord, IntoIbuError, Reader, Writer};
 
 /// Statistics of a UMI correction pass.
 ///
@@ -256,6 +258,11 @@ pub fn collapse_barcode_set<T: IbuRecord>(
 /// re-sorted after its UMIs are rewritten. Callers should therefore mark the
 /// output header as sorted (see the module example).
 ///
+/// Counted streams also stay deduplicated: correction can leave several
+/// records sharing a payload, so they are merged with
+/// [`merge_counted_records`] after re-sorting. Uncounted records are never
+/// merged - each represents a single read.
+///
 /// # Arguments
 ///
 /// * `reader` - Source of sorted records; the record type `T` must match the
@@ -283,8 +290,14 @@ where
         let mut corrected_set = Vec::with_capacity(barcode_set.len());
         let n_corrected = collapse_barcode_set(barcode_set, &mut corrected_set, umi_len)?;
 
-        // Restore full record ordering within the barcode set
+        // Restore full record ordering within the barcode set, then restore
+        // the deduplication invariant of counted streams (corrected records
+        // are only guaranteed adjacent to their representative after the sort)
         corrected_set.sort_unstable();
+        if n_corrected > 0 {
+            merge_counted_records(&mut corrected_set);
+        }
+
         *barcode_set = corrected_set;
         Ok(n_corrected)
     })?;
@@ -490,6 +503,45 @@ mod tests {
             assert_eq!(corrected.len(), 120);
             assert!(corrected.windows(2).all(|w| w[0] <= w[1]));
             assert!(corrected.iter().all(|r| r.umi == 0));
+        }
+    }
+
+    #[test]
+    fn test_correct_umis_parallel_counted_stays_deduplicated() {
+        // each barcode has a dominant UMI and a rare HD=1 neighbor: after
+        // correction the two counted records share a payload and must merge
+        let mut records = Vec::new();
+        for barcode in 0..10u64 {
+            records.push(RecordCount::new(Record::new(barcode, 0b0000, 0), 5));
+            records.push(RecordCount::new(Record::new(barcode, 0b0001, 0), 1));
+        }
+        records.sort_unstable();
+
+        let mut writer = Writer::new(Vec::new(), Header::new(16, 12)).unwrap();
+        writer.write_batch(&records).unwrap();
+        writer.finish().unwrap();
+        let buffer = writer.into_inner();
+
+        for threads in [1, 4] {
+            let reader = Reader::new(Cursor::new(buffer.clone())).unwrap();
+            let mut header = reader.header();
+            header.set_sorted();
+
+            let mut writer: Writer<_, RecordCount> = Writer::new(Vec::new(), header).unwrap();
+            let stats = correct_umis_parallel(reader, &mut writer, threads).unwrap();
+            assert_eq!(stats.total, 60);
+            assert_eq!(stats.corrected, 10);
+
+            let reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
+            let corrected: Vec<RecordCount> = reader
+                .iter_record_counts()
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            // one record per (barcode, umi, index), counts summed, strictly sorted
+            assert_eq!(corrected.len(), 10);
+            assert!(corrected.iter().all(|r| r.count == 6 && r.record.umi == 0));
+            assert!(corrected.windows(2).all(|w| w[0] < w[1]));
         }
     }
 

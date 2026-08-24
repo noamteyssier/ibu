@@ -200,6 +200,56 @@ fn wrap_ok<T>(item: T) -> Result<T, IbuError> {
     Ok(item)
 }
 
+/// Merges adjacent records sharing a payload in place, summing their counts.
+///
+/// Rewriting record fields (UMI correction, sequence consensus) can leave a
+/// counted stream with several records sharing a payload, breaking the
+/// one-record-per-observation invariant of counted files; this restores it.
+/// Records must be sorted (or at least grouped) so equal-key records are
+/// adjacent - the first record of each run is kept, accumulating the counts of
+/// the records merged into it.
+///
+/// No-op for uncounted record types, whose duplicates each represent a single
+/// read; collapse those into counted form with [`dedup_sorted`] instead.
+///
+/// # Examples
+///
+/// ```rust
+/// use ibu::{merge_counted_records, Record, RecordCount};
+///
+/// let mut records = vec![
+///     RecordCount::new(Record::new(0, 0, 0), 5),
+///     RecordCount::new(Record::new(0, 0, 0), 3),
+///     RecordCount::new(Record::new(0, 1, 0), 1),
+/// ];
+/// merge_counted_records(&mut records);
+/// assert_eq!(
+///     records,
+///     vec![
+///         RecordCount::new(Record::new(0, 0, 0), 8),
+///         RecordCount::new(Record::new(0, 1, 0), 1),
+///     ]
+/// );
+///
+/// // uncounted records are left untouched
+/// let mut records = vec![Record::new(0, 0, 0); 3];
+/// merge_counted_records(&mut records);
+/// assert_eq!(records.len(), 3);
+/// ```
+pub fn merge_counted_records<T: IbuRecord>(records: &mut Vec<T>) {
+    if !T::COUNTED {
+        return;
+    }
+    records.dedup_by(|later, first| {
+        if later.same_key(first) {
+            first.set_count(first.count() + later.count());
+            true
+        } else {
+            false
+        }
+    });
+}
+
 type InfallibleInput<T, I> = std::iter::Map<I, fn(T) -> Result<T, IbuError>>;
 
 /// Iterator adapter returned by [`dedup_sorted`].

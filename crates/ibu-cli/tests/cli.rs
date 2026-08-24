@@ -301,11 +301,11 @@ fn test_umi_correction_counted_records() {
     let input = dir.path().join("in.ibu");
     let output = dir.path().join("out.ibu");
 
-    // the error UMI has more rows but fewer reads - counts decide abundance
+    // the error UMIs have more rows but fewer reads - counts decide abundance
     let records = vec![
         RecordCount::new(Record::new(0, 0b0000, 0), 100),
         RecordCount::new(Record::new(0, 0b0001, 0), 2),
-        RecordCount::new(Record::new(0, 0b0001, 0), 3),
+        RecordCount::new(Record::new(0, 0b0010, 0), 3),
     ];
     write_records(&input, &records);
 
@@ -328,9 +328,8 @@ fn test_umi_correction_counted_records() {
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    assert!(corrected.iter().all(|r| r.record.umi == 0));
-    let total: u64 = corrected.iter().map(|r| r.count).sum();
-    assert_eq!(total, 105);
+    // the counted stream stays deduplicated: one merged record per triple
+    assert_eq!(corrected, vec![RecordCount::new(Record::new(0, 0, 0), 105)]);
 }
 
 #[test]
@@ -428,7 +427,7 @@ fn test_consensus_counted_records() {
     let input = dir.path().join("in.ibu");
     let output = dir.path().join("out.ibu");
 
-    // the ACGT variant has more rows but fewer reads - counts decide abundance
+    // the other variants have more rows but fewer reads - counts decide abundance
     let records = vec![
         ExtRecord::from_sequence(0, 0, 0, b"ACGG")
             .unwrap()
@@ -436,7 +435,7 @@ fn test_consensus_counted_records() {
         ExtRecord::from_sequence(0, 0, 0, b"ACGT")
             .unwrap()
             .to_counted(2),
-        ExtRecord::from_sequence(0, 0, 0, b"ACGT")
+        ExtRecord::from_sequence(0, 0, 0, b"TTTT")
             .unwrap()
             .to_counted(3),
     ];
@@ -461,11 +460,13 @@ fn test_consensus_counted_records() {
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    assert!(consolidated
-        .iter()
-        .all(|r| r.record.decode_sequence().unwrap().seq() == b"ACGG"));
-    let total: u64 = consolidated.iter().map(|r| r.count).sum();
-    assert_eq!(total, 105);
+    // the counted stream stays deduplicated: one merged record per triple
+    assert_eq!(consolidated.len(), 1);
+    assert_eq!(consolidated[0].count, 105);
+    assert_eq!(
+        consolidated[0].record.decode_sequence().unwrap().seq(),
+        b"ACGG"
+    );
 }
 
 #[test]

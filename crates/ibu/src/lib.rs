@@ -269,7 +269,7 @@ pub use constructs::{
     IbuRecord, Record, RecordCount, EXTENDED_RECORD_COUNT_SIZE, EXT_RECORD_SIZE, HEADER_SIZE,
     MAGIC, MIN_VERSION, RECORD_COUNT_SIZE, RECORD_SIZE, VERSION,
 };
-pub use dedup::{dedup_sorted, DedupExt, DedupResults, DedupSorted};
+pub use dedup::{dedup_sorted, merge_counted_records, DedupExt, DedupResults, DedupSorted};
 pub use error::{IbuError, IntoIbuError, Result};
 #[cfg(feature = "ext-sort")]
 pub use external_chunk::{external_sort, IbuExternalChunk};

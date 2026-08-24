@@ -55,7 +55,7 @@ use std::io::{Read, Write};
 use std::ops::AddAssign;
 
 use crate::barcode_set::process_barcode_sets_parallel;
-use crate::{ExtIbuRecord, Reader, Writer};
+use crate::{merge_counted_records, ExtIbuRecord, Reader, Writer};
 
 /// Statistics of a consensus consolidation pass.
 ///
@@ -168,15 +168,8 @@ pub fn consensus_barcode_set<T: ExtIbuRecord>(barcode_set: &mut Vec<T>) -> usize
     }
 
     // Restore the deduplication invariant of counted streams
-    if T::COUNTED && n_consolidated > 0 {
-        barcode_set.dedup_by(|later, first| {
-            if later.same_key(first) {
-                first.set_count(first.count() + later.count());
-                true
-            } else {
-                false
-            }
-        });
+    if n_consolidated > 0 {
+        merge_counted_records(barcode_set);
     }
 
     n_consolidated
