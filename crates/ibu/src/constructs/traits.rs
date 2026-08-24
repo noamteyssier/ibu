@@ -85,6 +85,13 @@ pub trait IbuRecord: Pod + Eq + Ord + Hash + Debug + Send + Sync {
         1
     }
 
+    /// Replaces the stored multiplicity of this record (e.g. when merging
+    /// records that share a payload).
+    ///
+    /// No-op for uncounted record types, whose multiplicity is always 1.
+    #[inline(always)]
+    fn set_count(&mut self, _count: u64) {}
+
     /// Returns whether two records represent the same observation, ignoring
     /// any stored count.
     ///

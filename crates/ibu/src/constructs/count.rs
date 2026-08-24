@@ -94,6 +94,11 @@ impl IbuRecord for RecordCount {
     }
 
     #[inline(always)]
+    fn set_count(&mut self, count: u64) {
+        self.count = count;
+    }
+
+    #[inline(always)]
     fn same_key(&self, other: &Self) -> bool {
         self.record == other.record
     }
@@ -178,6 +183,11 @@ impl IbuRecord for ExtRecordCount {
     #[inline(always)]
     fn count(&self) -> u64 {
         self.count
+    }
+
+    #[inline(always)]
+    fn set_count(&mut self, count: u64) {
+        self.count = count;
     }
 
     #[inline(always)]
@@ -275,6 +285,23 @@ mod tests {
         let mut ext_counted = ExtRecordCount::new(ext, 7);
         ext_counted.set_umi(11);
         assert_eq!(ext_counted.record.umi, 11);
+    }
+
+    #[test]
+    fn test_set_count() {
+        let mut counted = RecordCount::new(Record::new(1, 2, 3), 42);
+        counted.set_count(7);
+        assert_eq!(counted.count, 7);
+
+        let mut ext_counted =
+            ExtRecordCount::new(ExtRecord::from_sequence(1, 2, 3, b"ACGT").unwrap(), 42);
+        ext_counted.set_count(7);
+        assert_eq!(ext_counted.count, 7);
+
+        // no-op for uncounted record types
+        let mut record = Record::new(1, 2, 3);
+        record.set_count(7);
+        assert_eq!(IbuRecord::count(&record), 1);
     }
 
     #[test]

@@ -9,9 +9,12 @@
 //! multiplicities), with ties broken to the first variant in sorted order - so
 //! each triple is associated with exactly one `(seq_len, seq_buf)`.
 //!
-//! Consolidation rewrites sequences but preserves records and their
-//! multiplicities; pipe the output through [`dedup_sorted`](crate::dedup_sorted)
-//! to collapse the now-identical records into counted form.
+//! Consolidation always preserves read multiplicities and sortedness. Counted
+//! streams additionally stay deduplicated: records left sharing a payload
+//! after rewriting are merged, summing their counts. Plain (uncounted) streams
+//! keep their now-identical duplicate records - each represents a single read -
+//! so pipe the output through [`dedup_sorted`](crate::dedup_sorted) to collapse
+//! them into counted form.
 //!
 //! The main entry point is [`consensus_parallel`], which drives an entire
 //! reader-to-writer consolidation. The building blocks ([`consensus_group`],
@@ -94,6 +97,10 @@ impl AddAssign for ConsensusStats {
 /// it. The group is re-sorted afterwards so counted records retain their full
 /// ordering.
 ///
+/// Note that rewriting is purely in place: counted records left sharing a
+/// payload are **not** merged here (a slice cannot shrink) - that happens in
+/// [`consensus_barcode_set`].
+///
 /// Returns the number of reads consolidated.
 pub fn consensus_group<T: ExtIbuRecord>(group: &mut [T]) -> usize {
     if group.len() < 2 {
@@ -143,7 +150,13 @@ pub fn consensus_group<T: ExtIbuRecord>(group: &mut [T]) -> usize {
 /// The barcode set must be sorted (as read from a sorted stream), so each
 /// (UMI, index) group is a contiguous run sorted by sequence. Consolidation is
 /// in place and preserves sortedness. Returns the number of reads consolidated.
-pub fn consensus_barcode_set<T: ExtIbuRecord>(barcode_set: &mut [T]) -> usize {
+///
+/// Counted streams also stay deduplicated: rewriting can leave several records
+/// in a group sharing a payload, so adjacent equal-key records are merged by
+/// summing their counts. Uncounted records are never merged - each represents
+/// a single read - so plain streams keep their (now identical) duplicates;
+/// collapse them with [`dedup_sorted`](crate::dedup_sorted) if desired.
+pub fn consensus_barcode_set<T: ExtIbuRecord>(barcode_set: &mut Vec<T>) -> usize {
     let mut n_consolidated = 0;
     let mut start = 0;
     while start < barcode_set.len() {
@@ -153,6 +166,19 @@ pub fn consensus_barcode_set<T: ExtIbuRecord>(barcode_set: &mut [T]) -> usize {
         n_consolidated += consensus_group(&mut barcode_set[start..end]);
         start = end;
     }
+
+    // Restore the deduplication invariant of counted streams
+    if T::COUNTED && n_consolidated > 0 {
+        barcode_set.dedup_by(|later, first| {
+            if later.same_key(first) {
+                first.set_count(first.count() + later.count());
+                true
+            } else {
+                false
+            }
+        });
+    }
+
     n_consolidated
 }
 
@@ -166,7 +192,8 @@ pub fn consensus_barcode_set<T: ExtIbuRecord>(barcode_set: &mut [T]) -> usize {
 /// thread counts.
 ///
 /// Consolidation preserves sortedness, so callers should mark the output
-/// header as sorted (see the module example).
+/// header as sorted (see the module example). Counted streams also stay
+/// deduplicated (see [`consensus_barcode_set`]).
 ///
 /// # Arguments
 ///
@@ -335,18 +362,20 @@ mod tests {
     /// Consolidation composes with dedup: each triple collapses to one record.
     #[test]
     fn test_consensus_then_dedup() {
-        let mut records = sorted(vec![
+        let mut first_set = sorted(vec![
             ext(0, 0, 0, b"ACGG"),
             ext(0, 0, 0, b"ACGT"),
             ext(0, 0, 0, b"ACGT"),
+        ]);
+        let mut second_set = sorted(vec![
             ext(1, 0, 0, b"TT"),
             ext(1, 0, 0, b"TTTT"),
             ext(1, 0, 0, b"TTTT"),
         ]);
-        consensus_barcode_set(&mut records[..3]);
-        consensus_barcode_set(&mut records[3..]);
+        consensus_barcode_set(&mut first_set);
+        consensus_barcode_set(&mut second_set);
 
-        let counted: Vec<ExtRecordCount> = dedup_sorted(records.into_iter())
+        let counted: Vec<ExtRecordCount> = dedup_sorted(first_set.into_iter().chain(second_set))
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(
@@ -356,6 +385,82 @@ mod tests {
                 ExtRecordCount::new(ext(1, 0, 0, b"TTTT"), 3),
             ]
         );
+    }
+
+    /// Counted barcode sets stay deduplicated: records sharing a payload
+    /// after rewriting are merged with their counts summed.
+    #[test]
+    fn test_counted_barcode_set_stays_deduplicated() {
+        let mut barcode_set = sorted(vec![
+            ExtRecordCount::new(ext(0, 0, 0, b"ACGA"), 2),
+            ExtRecordCount::new(ext(0, 0, 0, b"ACGC"), 1),
+            ExtRecordCount::new(ext(0, 0, 0, b"ACGT"), 4),
+            // single-variant group: untouched, not merged with anything
+            ExtRecordCount::new(ext(0, 1, 0, b"TTTT"), 9),
+        ]);
+        let n = consensus_barcode_set(&mut barcode_set);
+        assert_eq!(n, 3);
+        assert_eq!(
+            barcode_set,
+            vec![
+                ExtRecordCount::new(ext(0, 0, 0, b"ACGT"), 7),
+                ExtRecordCount::new(ext(0, 1, 0, b"TTTT"), 9),
+            ]
+        );
+    }
+
+    /// Plain (uncounted) records are never merged - each is a single read.
+    #[test]
+    fn test_plain_barcode_set_keeps_duplicates() {
+        let mut barcode_set = sorted(vec![
+            ext(0, 0, 0, b"ACGG"),
+            ext(0, 0, 0, b"ACGT"),
+            ext(0, 0, 0, b"ACGT"),
+        ]);
+        let n = consensus_barcode_set(&mut barcode_set);
+        assert_eq!(n, 1);
+        assert_eq!(barcode_set, vec![ext(0, 0, 0, b"ACGT"); 3]);
+    }
+
+    #[test]
+    fn test_consensus_parallel_counted_stays_deduplicated() {
+        // each barcode has two variants of one triple: they merge to one record
+        let mut records = Vec::new();
+        for barcode in 0..10u64 {
+            records.push(ExtRecordCount::new(ext(barcode, 0, 0, b"ACGG"), 1));
+            records.push(ExtRecordCount::new(ext(barcode, 0, 0, b"ACGT"), 5));
+        }
+        records.sort_unstable();
+
+        let mut writer = Writer::new(Vec::new(), Header::new(16, 12)).unwrap();
+        writer.write_batch(&records).unwrap();
+        writer.finish().unwrap();
+        let buffer = writer.into_inner();
+
+        for threads in [1, 4] {
+            let reader = Reader::new(Cursor::new(buffer.clone())).unwrap();
+            let mut header = reader.header();
+            header.set_sorted();
+
+            let mut writer: Writer<_, ExtRecordCount> = Writer::new(Vec::new(), header).unwrap();
+            let stats = consensus_parallel(reader, &mut writer, threads).unwrap();
+            assert_eq!(stats.total, 60);
+            assert_eq!(stats.consolidated, 10);
+
+            let reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
+            let consolidated: Vec<ExtRecordCount> = reader
+                .iter_ext_record_counts()
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            // one record per triple, counts summed, strictly sorted
+            assert_eq!(consolidated.len(), 10);
+            assert!(consolidated.iter().all(|r| r.count == 6));
+            assert!(consolidated
+                .iter()
+                .all(|r| r.record.decode_sequence().unwrap().seq() == b"ACGT"));
+            assert!(consolidated.windows(2).all(|w| w[0] < w[1]));
+        }
     }
 
     fn write_to_vec(records: &[ExtRecord]) -> Vec<u8> {
