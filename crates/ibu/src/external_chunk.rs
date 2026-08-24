@@ -124,7 +124,7 @@ pub fn external_sort<T, I>(
     records: I,
     chunk_records: usize,
     threads: usize,
-) -> crate::Result<impl Iterator<Item = Result<T, IbuError>>>
+) -> crate::Result<impl Iterator<Item = Result<T, IbuError>> + Send>
 where
     T: IbuRecord,
     I: IntoIterator<Item = Result<T, IbuError>>,

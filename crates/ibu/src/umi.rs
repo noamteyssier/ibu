@@ -8,10 +8,12 @@
 //! stored counts. Counted streams also stay deduplicated: records left sharing
 //! a payload after correction are merged with [`merge_counted_records`].
 //!
-//! The main entry point is [`correct_umis_parallel`], which drives an entire
+//! The main entry points are [`correct_umis_parallel`], which drives an entire
 //! reader-to-writer correction over the shared [`process_barcode_sets_parallel`]
-//! path. The building blocks ([`collapse_barcode_set`], [`collapse_index_set`])
-//! are public so custom pipelines can compose them differently.
+//! path, and [`correct_umis_parallel_iter`], its iterator counterpart for
+//! composable pipelines. The building blocks ([`collapse_barcode_set`],
+//! [`collapse_index_set`]) are public so custom pipelines can compose them
+//! differently.
 //!
 //! # Examples
 //!
@@ -46,8 +48,10 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::ops::AddAssign;
 
-use crate::barcode_set::process_barcode_sets_parallel;
-use crate::{merge_counted_records, IbuRecord, IntoIbuError, Reader, Writer};
+use crate::barcode_set::{
+    process_barcode_sets_parallel, process_barcode_sets_parallel_iter, ParallelBarcodeSets,
+};
+use crate::{merge_counted_records, IbuError, IbuRecord, IntoIbuError, Reader, Writer};
 
 /// Statistics of a UMI correction pass.
 ///
@@ -284,25 +288,111 @@ where
     let umi_len = reader.header().umi_len as usize;
 
     let stats = process_barcode_sets_parallel(reader, writer, threads, |barcode_set| {
-        let mut corrected_set = Vec::with_capacity(barcode_set.len());
-        let n_corrected = collapse_barcode_set(barcode_set, &mut corrected_set, umi_len)?;
-
-        // Restore full record ordering within the barcode set, then restore
-        // the deduplication invariant of counted streams (corrected records
-        // are only guaranteed adjacent to their representative after the sort)
-        corrected_set.sort_unstable();
-        if n_corrected > 0 {
-            merge_counted_records(&mut corrected_set);
-        }
-
-        *barcode_set = corrected_set;
-        Ok(n_corrected)
+        correct_barcode_set_in_place(barcode_set, umi_len)
     })?;
 
     Ok(UmiCorrectionStats {
         total: stats.total,
         corrected: stats.modified,
     })
+}
+
+/// Corrects a barcode set in place, preserving sortedness and the
+/// deduplication invariant of counted streams.
+fn correct_barcode_set_in_place<T: IbuRecord>(
+    barcode_set: &mut Vec<T>,
+    umi_len: usize,
+) -> crate::Result<usize> {
+    let mut corrected_set = Vec::with_capacity(barcode_set.len());
+    let n_corrected = collapse_barcode_set(barcode_set, &mut corrected_set, umi_len)?;
+
+    // Restore full record ordering within the barcode set, then restore
+    // the deduplication invariant of counted streams (corrected records
+    // are only guaranteed adjacent to their representative after the sort)
+    corrected_set.sort_unstable();
+    if n_corrected > 0 {
+        merge_counted_records(&mut corrected_set);
+    }
+
+    *barcode_set = corrected_set;
+    Ok(n_corrected)
+}
+
+/// Corrects UMI errors across an entire sorted record stream in parallel,
+/// yielding the corrected records as a sorted stream.
+///
+/// The iterator counterpart of [`correct_umis_parallel`], for composing
+/// pipelines without intermediate files: it accepts any fallible record
+/// iterator (a [`Reader`](crate::Reader) iterator, an
+/// [`external_sort`](crate::external_sort) merger, a
+/// [`dedup`](crate::DedupExt::dedup) adapter, ...) and yields a stream with the
+/// same guarantees as the reader-to-writer version - sorted, deterministic
+/// across thread counts, and deduplicated for counted record types.
+///
+/// Since there is no header to consult, the UMI length is passed explicitly.
+/// Correction statistics are available from the returned iterator via
+/// [`UmiCorrectionIter::stats`] once the stream is exhausted.
+///
+/// # Examples
+///
+/// ```rust
+/// use ibu::umi::correct_umis_parallel_iter;
+/// use ibu::Record;
+///
+/// # fn main() -> ibu::Result<()> {
+/// // A sorted stream where a rare UMI (0b01) neighbors a dominant one (0b00)
+/// let records = vec![
+///     Record::new(1, 0b00, 0),
+///     Record::new(1, 0b00, 0),
+///     Record::new(1, 0b01, 0),
+/// ];
+///
+/// let mut corrected = correct_umis_parallel_iter(records.into_iter().map(Ok), 12, 1);
+/// let records: Vec<Record> = corrected.by_ref().collect::<Result<_, _>>()?;
+///
+/// assert!(records.iter().all(|r| r.umi == 0b00));
+/// assert_eq!(corrected.stats().corrected, 1);
+/// # Ok(())
+/// # }
+/// ```
+pub fn correct_umis_parallel_iter<T, I>(
+    records: I,
+    umi_len: usize,
+    threads: usize,
+) -> UmiCorrectionIter<T>
+where
+    T: IbuRecord,
+    I: Iterator<Item = Result<T, IbuError>> + Send + 'static,
+{
+    UmiCorrectionIter {
+        inner: process_barcode_sets_parallel_iter(records, threads, move |barcode_set| {
+            correct_barcode_set_in_place(barcode_set, umi_len)
+        }),
+    }
+}
+
+/// Sorted corrected-record stream returned by [`correct_umis_parallel_iter`].
+pub struct UmiCorrectionIter<T: IbuRecord> {
+    inner: ParallelBarcodeSets<T>,
+}
+
+impl<T: IbuRecord> UmiCorrectionIter<T> {
+    /// Statistics of the correction so far; final once the stream is exhausted.
+    pub fn stats(&self) -> UmiCorrectionStats {
+        let stats = self.inner.stats();
+        UmiCorrectionStats {
+            total: stats.total,
+            corrected: stats.modified,
+        }
+    }
+}
+
+impl<T: IbuRecord> Iterator for UmiCorrectionIter<T> {
+    type Item = crate::Result<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
 }
 
 #[cfg(test)]
