@@ -65,6 +65,9 @@
 //!   records
 //! - [`umi::correct_umis_parallel`]: parallel UMI error correction over sorted
 //!   streams, merging Hamming-distance-1 UMIs into their most abundant neighbor
+//! - [`consensus::consensus_parallel`]: parallel sequence consensus over sorted
+//!   extended streams, rewriting each (barcode, UMI, index) group's sequences
+//!   to the group's most abundant variant
 //!
 //! ## Basic Usage
 //!
@@ -211,6 +214,7 @@
 //! # }
 //! ```
 
+pub mod consensus;
 mod constructs;
 mod dedup;
 mod error;
@@ -254,9 +258,9 @@ macro_rules! with_record_type {
 }
 
 pub use constructs::{
-    ExtRecord, ExtRecordBuffer, ExtRecordBufferAscii, ExtRecordCount, Header, IbuRecord, Record,
-    RecordCount, EXTENDED_RECORD_COUNT_SIZE, EXT_RECORD_SIZE, HEADER_SIZE, MAGIC, MIN_VERSION,
-    RECORD_COUNT_SIZE, RECORD_SIZE, VERSION,
+    ExtIbuRecord, ExtRecord, ExtRecordBuffer, ExtRecordBufferAscii, ExtRecordCount, Header,
+    IbuRecord, Record, RecordCount, EXTENDED_RECORD_COUNT_SIZE, EXT_RECORD_SIZE, HEADER_SIZE,
+    MAGIC, MIN_VERSION, RECORD_COUNT_SIZE, RECORD_SIZE, VERSION,
 };
 pub use dedup::{dedup_sorted, DedupExt, DedupResults, DedupSorted};
 pub use error::{IbuError, IntoIbuError, Result};
