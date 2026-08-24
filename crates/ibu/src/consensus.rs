@@ -7,7 +7,7 @@
 //! (barcode, UMI, index) group, every record's sequence is rewritten to the
 //! group's most abundant variant - measured in reads (summed record
 //! multiplicities), with ties broken to the first variant in sorted order - so
-//! each triple is associated with exactly one `(seq_len, seq_buf)`.
+//! each triple is associated with exactly one [`SeqKey`](crate::SeqKey).
 //!
 //! Consolidation always preserves read multiplicities and sortedness. Counted
 //! streams additionally stay deduplicated: records left sharing a payload
@@ -130,11 +130,10 @@ pub fn consensus_group<T: ExtIbuRecord>(group: &mut [T]) -> usize {
     }
 
     // Rewrite every non-consensus record to the consensus variant
-    let (seq_len, seq_buf) = best_key;
     let mut n_consolidated = 0;
     for record in group.iter_mut() {
         if record.seq_key() != best_key {
-            record.set_seq(seq_len, seq_buf);
+            record.set_seq(best_key.len, best_key.seq);
             n_consolidated += record.count() as usize;
         }
     }
@@ -177,8 +176,7 @@ pub fn consensus_barcode_set<T: ExtIbuRecord>(barcode_set: &mut Vec<T>) -> usize
 
 /// Consolidates sequences across an entire sorted record stream in parallel.
 ///
-/// A thin wrapper over
-/// [`process_barcode_sets_parallel`](crate::barcode_set::process_barcode_sets_parallel):
+/// A thin wrapper over [`process_barcode_sets_parallel`]:
 /// worker threads pull barcode sets off a shared reader and consolidate them
 /// independently with [`consensus_barcode_set`]; a dedicated writer thread
 /// reassembles the results in input order, so output is deterministic across

@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 
 mod cat;
 mod consensus;
+mod count;
 mod sort;
 mod umi;
 mod utils;
@@ -37,6 +38,11 @@ enum Command {
     ///
     /// Expects a sorted extended IBU file as input
     Consensus(consensus::ArgsConsensus),
+
+    /// Count the number of unique UMIs per barcode and index
+    ///
+    /// Expects a sorted IBU file as input
+    Count(count::ArgsCount),
 }
 
 fn run() -> Result<()> {
@@ -46,6 +52,7 @@ fn run() -> Result<()> {
         Command::Sort(args) => sort::run(&args),
         Command::Umi(args) => umi::run(&args),
         Command::Consensus(args) => consensus::run(&args),
+        Command::Count(args) => count::run(&args),
     }
 }
 

@@ -4,8 +4,8 @@
 //! in high-throughput genomics applications. It provides fast, memory-efficient I/O operations
 //! with support for parallel processing and memory-mapped files.
 //!
-//! The library is heavily inspired by the [BUS binary format](https://github.com/BUStools/BUS-format)
-//! but provides a more minimal and performant implementation.
+//! The format is heavily inspired by the [BUS binary format](https://github.com/BUStools/BUS-format)
+//! but has been designed for extensions into other applications.
 //!
 //! ## Format Specification
 //!
@@ -68,6 +68,9 @@
 //! - [`consensus::consensus_parallel`]: parallel sequence consensus over sorted
 //!   extended streams, rewriting each (barcode, UMI, index) group's sequences
 //!   to the group's most abundant variant
+//! - [`count::BarcodeUmiCounter`]: unique-UMI counting over sorted streams,
+//!   attributing each (barcode, UMI) group to its most abundant index - and,
+//!   for extended records, to its most abundant sequence variant
 //!
 //! The two parallel routines are thin wrappers over
 //! [`barcode_set::process_barcode_sets_parallel`], which fans barcode sets out
@@ -223,6 +226,7 @@
 pub mod barcode_set;
 pub mod consensus;
 mod constructs;
+pub mod count;
 mod dedup;
 mod error;
 #[cfg(feature = "ext-sort")]
@@ -266,14 +270,14 @@ macro_rules! with_record_type {
 
 pub use constructs::{
     ExtIbuRecord, ExtRecord, ExtRecordBuffer, ExtRecordBufferAscii, ExtRecordCount, Header,
-    IbuRecord, Record, RecordCount, EXTENDED_RECORD_COUNT_SIZE, EXT_RECORD_SIZE, HEADER_SIZE,
-    MAGIC, MIN_VERSION, RECORD_COUNT_SIZE, RECORD_SIZE, VERSION,
+    IbuRecord, Record, RecordCount, SeqKey, EXTENDED_RECORD_COUNT_SIZE, EXT_RECORD_SIZE,
+    HEADER_SIZE, MAGIC, MIN_VERSION, RECORD_COUNT_SIZE, RECORD_SIZE, VERSION,
 };
 pub use dedup::{dedup_sorted, merge_counted_records, DedupExt, DedupResults, DedupSorted};
 pub use error::{IbuError, IntoIbuError, Result};
 #[cfg(feature = "ext-sort")]
 pub use external_chunk::{external_sort, IbuExternalChunk};
-pub use io::{load_to_vec, MmapReader, Reader, Writer};
+pub use io::{load_to_vec, MmapReader, Reader, RecordIter, Writer};
 pub use parallel::{ParallelProcessor, ParallelReader};
 
 /// Re-export ext-sort for versioning compatibility

@@ -18,7 +18,7 @@ pub type BoxedWriter = Box<dyn Write + Send>;
 /// then buffers records to minimize system calls.
 ///
 /// The writer is generic over the record type `T` (defaulting to [`Record`]), so the
-/// same code paths serve both classic 24-byte records and 64-byte [`ExtRecord`]s
+/// same code paths serve both classic 24-byte records and 64-byte [`ExtRecord`](crate::ExtRecord)s
 /// (`Writer<W, ExtRecord>`). The extended header flag is stamped automatically to
 /// match `T` on construction.
 ///

@@ -188,6 +188,11 @@ impl IbuRecord for ExtRecord {
     fn sequence(&self) -> crate::Result<Option<ExtRecordBufferAscii>> {
         self.decode_sequence().map(Some)
     }
+
+    #[inline(always)]
+    fn opt_seq_key(&self) -> Option<SeqKey> {
+        Some(ExtIbuRecord::seq_key(self))
+    }
 }
 
 impl ExtIbuRecord for ExtRecord {
@@ -205,6 +210,37 @@ impl ExtIbuRecord for ExtRecord {
     fn set_seq(&mut self, seq_len: u64, seq_buf: ExtRecordBuffer) {
         self.seq_len = seq_len;
         self.seq_buf = seq_buf;
+    }
+}
+
+/// A 2-bit packed sequence with its length - the equivalence used when
+/// grouping sequence variants (see [`ExtIbuRecord::seq_key`]).
+///
+/// # Examples
+///
+/// ```rust
+/// use ibu::{ExtIbuRecord, ExtRecord};
+///
+/// # fn main() -> ibu::Result<()> {
+/// let record = ExtRecord::from_sequence(1, 2, 3, b"ACGT")?;
+/// let key = record.seq_key();
+/// assert_eq!(key.len, 4);
+/// assert_eq!(key.decode()?.seq(), b"ACGT");
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SeqKey {
+    /// Number of bases stored in the packed sequence buffer
+    pub len: u64,
+    /// The 2-bit packed sequence buffer
+    pub seq: ExtRecordBuffer,
+}
+impl SeqKey {
+    /// Decodes the packed sequence into an ASCII nucleotide buffer.
+    pub fn decode(&self) -> crate::Result<ExtRecordBufferAscii> {
+        ExtRecordBufferAscii::new(&self.seq, self.len as usize)
+            .map_err(IntoIbuError::into_ibu_error)
     }
 }
 

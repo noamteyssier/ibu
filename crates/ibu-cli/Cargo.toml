@@ -20,6 +20,7 @@ anyhow = { workspace = true }
 bitnuc = { workspace = true }
 bytesize = { workspace = true }
 clap = { workspace = true }
+niffler = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -350,6 +350,7 @@ dependencies = [
  "bytesize",
  "clap",
  "ibu",
+ "niffler",
  "tempfile",
 ]
 
