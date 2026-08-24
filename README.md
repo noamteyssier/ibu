@@ -4,59 +4,67 @@
 [![Crates.io](https://img.shields.io/crates/d/ibu?color=orange&label=crates.io)](https://crates.io/crates/ibu)
 [![docs.rs](https://img.shields.io/docsrs/ibu?color=green&label=docs.rs)](https://docs.rs/ibu/latest/ibu/)
 
-`ibu` is a Rust library for efficiently handling binary-encoding barcode, UMI, and index data in
-high-throughput genomics applications.
+`ibu` is a binary format for barcode, UMI, and index data in high-throughput genomics applications,
+heavily inspired by the [BUS format](https://github.com/BUStools/BUS-format).
 
-It is designed to be fast, memory-efficient, and easy to use.
+This repository provides:
 
-It is heavily inspired and even more minimal than the [BUS binary format](https://github.com/BUStools/BUS-format).
+- [`ibu`](crates/ibu): a Rust library for reading, writing, and processing IBU files
+- [`ibu-cli`](crates/ibu-cli): a command-line toolkit (`ibu`) built on the library
+
+The library is generic over the record type so readers, writers, and routines (sorting, deduplication, parallel processing) work across all record layouts.
+
+## Installation
+
+```bash
+cargo add ibu         # library
+cargo install ibu-cli # command-line tool
+```
 
 # Format Specification
 
-The binary format consists of a header followed by a collection of records.
+The binary format consists of a 32-byte header followed by a collection of fixed-size records.
 
 ## Header
 
-The header is strictly defined in the following 32 bytes:
+| Field          | Type      | Description                                                   |
+| -------------- | --------- | ------------------------------------------------------------- |
+| Magic          | `u32`     | File type identifier: `0x21554249` ("IBU!")                   |
+| Version        | `u32`     | Format version (currently 3; version 2 files remain readable) |
+| Barcode Length | `u32`     | Length of the barcode field in bases (MAX = 32)               |
+| UMI Length     | `u32`     | Length of the UMI field in bases (MAX = 32)                   |
+| Flags          | `u64`     | Bit flags (bit 0: sorted, bit 1: extended, bit 2: counted)    |
+| Reserved       | `[u8; 8]` | Reserved bytes for future extensions                          |
 
-| Field | Type | Description |
-| --- | --- | --- |
-| Magic | `u32` | File type identifier: `0x21554249` ("IBU!") |
-| Version | `u32` | The version of the binary format (currently 2) |
-| Barcode Length | `u32` | The length of the barcode field in bases (MAX = 32) |
-| UMI Length | `u32` | The length of the UMI field in bases (MAX = 32) |
-| Flags | `u64` | Bit flags (bit 0: sorted, rest reserved for future use) |
-| Record Count | `u64` | Total number of records (0 if unknown) |
-| Reserved | `[u8; 8]` | Reserved bytes for future extensions |
+## Records
 
-## Record
+The record layout of a file is discriminated by the extended and counted header flags:
 
-The record is strictly defined in the following 24 bytes:
+| Extended | Counted | Record Type      | Size (bytes) |
+| -------- | ------- | ---------------- | ------------ |
+| no       | no      | `Record`         | 24           |
+| no       | yes     | `RecordCount`    | 32           |
+| yes      | no      | `ExtRecord`      | 64           |
+| yes      | yes     | `ExtRecordCount` | 72           |
 
-| Field | Type | Description |
-| --- | --- | --- |
-| Barcode | `u64` | The barcode represented with 2bit encoding |
-| UMI | `u64` | The UMI represented with 2bit encoding |
-| Index | `u64` | A numerical index (abstract application specific usage for users) |
+The base `Record` holds three `u64` fields: a 2-bit encoded barcode, a 2-bit encoded UMI, and an application-specific index. `ExtRecord` appends a 2-bit packed sequence of up to 128 bases; counted variants append a `u64` multiplicity, collapsing the heavy repetition typical of single-cell data.
 
-Importantly, the barcode and UMI fields are encoded with 2bit encoding, which means that the
-maximum barcode and UMI lengths are 32 bases.
+Barcodes and UMIs are 2-bit encoded (see [bitnuc](https://crates.io/crates/bitnuc)) and limited at 32bp each.
 
-For 2bit {en,de}coding in rust feel free to check out [bitnuc](https://crates.io/crates/bitnuc).
+# Command-Line Usage
 
-Users may choose to encode their own data into the index field or use it for other purposes.
+The `ibu` binary provides the standard processing pipeline:
 
-# Error Handling
+| Command     | Description                                                                        |
+| ----------- | ---------------------------------------------------------------------------------- |
+| `view`      | View the contents of an IBU file as plain text                                     |
+| `cat`       | Concatenate multiple IBU files                                                     |
+| `sort`      | Sort an IBU file (external merge sort; handles files larger than memory)           |
+| `umi`       | Correct UMI errors (merge Hamming-distance-1 UMIs)                                 |
+| `consensus` | Consolidate each (barcode, UMI, index) group to its most abundant sequence variant |
+| `count`     | Count unique UMIs per barcode and index                                            |
 
-The library provides detailed error handling through the `IbuError` enum, covering:
-
-- IO errors
-- Invalid magic number or version in the header
-- Invalid barcode/UMI lengths
-- Truncated or corrupted records
-- Invalid memory map sizes
-
-# Usage
+# Library Usage
 
 ```rust
 use ibu::{Header, Reader, Record, Writer};
@@ -64,118 +72,36 @@ use std::io::Cursor;
 
 // Create a header for 16-base barcodes and 12-base UMIs
 let mut header = Header::new(16, 12);
-header.set_sorted(); // Mark as sorted if needed
+header.set_sorted();
 
-// Create some records
 let records = vec![
-   Record::new(0x00001100, 0x100011, 0),
-   Record::new(0x00001101, 0x100010, 1),
+    Record::new(0x00001100, 0x100011, 0),
+    Record::new(0x00001101, 0x100010, 1),
 ];
 
 // Write to a buffer
-let buffer = Vec::new();
-let mut writer = Writer::new(buffer, header)?;
+let mut writer = Writer::new(Vec::new(), header)?;
 writer.write_batch(&records)?;
 writer.finish()?;
-
-// Get the written buffer
 let buffer = writer.into_inner();
 
-// The expected buffer should be 32 (header) + 24 * 2 (records) = 80 bytes
-assert_eq!(buffer.len(), 80);
+// Read it back
+let reader = Reader::new(Cursor::new(buffer))?;
+assert_eq!(reader.header().bc_len, 16);
 
-// Read from buffer
-let cursor = Cursor::new(buffer);
-let reader = Reader::new(cursor)?;
-
-// Access the header
-let header = reader.header();
-assert_eq!(header.bc_len, 16);
-assert_eq!(header.umi_len, 12);
-
-// Read the records
-let mut read_records = Vec::new();
-for record in reader {
-   read_records.push(record?);
-}
-assert_eq!(records, read_records);
+let read_records: Result<Vec<_>, _> = reader.iter_records()?.collect();
+assert_eq!(records, read_records?);
 ```
 
-# Advanced Features
+Beyond basic I/O, the library provides:
 
-## Memory-Mapped Reading with Parallel Processing
+- Memory-mapped reading with multi-threaded parallel processing (`MmapReader`, `ParallelProcessor`)
+- Transparent gzip/zstd compression via [niffler](https://crates.io/crates/niffler)
+- External sorting, deduplication, UMI correction, sequence consensus, and UMI counting —
+  the same routines backing the CLI
+- Runtime dispatch from a file header to its concrete record type (`with_record_type!`)
 
-For high-performance applications, `ibu` provides memory-mapped file reading with built-in parallel processing support:
-
-```rust
-use ibu::{MmapReader, ParallelProcessor, ParallelReader, Record};
-use std::sync::{Arc, Mutex};
-
-// Define a custom processor
-#[derive(Clone, Default)]
-struct MyProcessor {
-    local_count: u64,
-    global_count: Arc<Mutex<u64>>,
-}
-
-impl ParallelProcessor for MyProcessor {
-    fn process_record(&mut self, record: Record) -> ibu::Result<()> {
-        self.local_count += 1;
-        Ok(())
-    }
-    
-    fn on_batch_complete(&mut self) -> ibu::Result<()> {
-        let mut guard = self.global_count.lock().unwrap();
-        *guard += self.local_count;
-        self.local_count = 0;
-        Ok(())
-    }
-}
-
-// Use memory-mapped reader with parallel processing
-let reader = MmapReader::new("data.ibu")?;
-let processor = MyProcessor::default();
-reader.process_parallel(processor, 0)?; // 0 = use all available cores
-```
-
-## Fast Bulk Loading
-
-Load entire files directly into memory:
-
-```rust
-use ibu::load_to_vec;
-
-let (header, records) = load_to_vec("data.ibu")?;
-println!("Loaded {} records", records.len());
-```
-
-## Compression Support
-
-When the `niffler` feature is enabled (default), `ibu` automatically handles gzip and zstd compression:
-
-```rust
-// Automatically detects and decompresses
-let reader = Reader::from_path("data.ibu.gz")?;
-```
-
-# Performance
-
-`ibu` is designed for high-throughput applications:
-
-- Zero-copy deserialization using `bytemuck`
-- Memory-mapped I/O for fast random access
-- Multi-threaded parallel processing
-- Buffered I/O with configurable buffer sizes
-- Cache-line friendly data structures
-
-Typical performance on modern hardware:
-- Sequential write: ~1-2 GB/s
-- Sequential read: ~2-4 GB/s  
-- Parallel processing: Scales linearly with CPU cores
-
-# Contributing
-
-Contributions are welcome! Feel free to open an issue or submit a pull request.
+See the [documentation](https://docs.rs/ibu/latest/ibu/) for details and examples.
 
 # License
 
