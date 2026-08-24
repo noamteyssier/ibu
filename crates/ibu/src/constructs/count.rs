@@ -1,6 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 
-use crate::{ExtRecord, IbuRecord, Record};
+use crate::{ExtIbuRecord, ExtRecord, ExtRecordBuffer, IbuRecord, Record};
 
 pub const RECORD_COUNT_SIZE: usize = std::mem::size_of::<RecordCount>();
 pub const EXTENDED_RECORD_COUNT_SIZE: usize = std::mem::size_of::<ExtRecordCount>();
@@ -192,6 +192,23 @@ impl IbuRecord for ExtRecordCount {
 
     fn sequence(&self) -> crate::Result<Option<crate::ExtRecordBufferAscii>> {
         self.record.sequence()
+    }
+}
+
+impl ExtIbuRecord for ExtRecordCount {
+    #[inline(always)]
+    fn seq_len(&self) -> u64 {
+        self.record.seq_len
+    }
+
+    #[inline(always)]
+    fn seq_buf(&self) -> &ExtRecordBuffer {
+        &self.record.seq_buf
+    }
+
+    #[inline(always)]
+    fn set_seq(&mut self, seq_len: u64, seq_buf: ExtRecordBuffer) {
+        self.record.set_seq(seq_len, seq_buf);
     }
 }
 

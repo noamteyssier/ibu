@@ -100,3 +100,30 @@ pub trait IbuRecord: Pod + Eq + Ord + Hash + Debug + Send + Sync {
     /// For counted types this replaces the stored count.
     fn to_counted(&self, count: u64) -> Self::Counted;
 }
+
+/// Trait for extended record types carrying a 2-bit packed sequence payload.
+///
+/// Implemented by [`ExtRecord`](crate::ExtRecord) and
+/// [`ExtRecordCount`](crate::ExtRecordCount), allowing sequence-aware tooling
+/// (e.g. [consensus consolidation](crate::consensus)) to be written once,
+/// generic over both.
+pub trait ExtIbuRecord: IbuRecord {
+    /// Number of bases stored in the packed sequence buffer.
+    fn seq_len(&self) -> u64;
+
+    /// The 2-bit packed sequence buffer.
+    fn seq_buf(&self) -> &crate::ExtRecordBuffer;
+
+    /// Replaces the packed sequence (e.g. during consensus consolidation).
+    ///
+    /// Bases beyond `seq_len` must be zero in `seq_buf` (see the invariant on
+    /// [`ExtRecord`](crate::ExtRecord)).
+    fn set_seq(&mut self, seq_len: u64, seq_buf: crate::ExtRecordBuffer);
+
+    /// The packed sequence as a `(seq_len, seq_buf)` pair - the equivalence
+    /// used when grouping sequence variants.
+    #[inline(always)]
+    fn seq_key(&self) -> (u64, crate::ExtRecordBuffer) {
+        (self.seq_len(), *self.seq_buf())
+    }
+}
