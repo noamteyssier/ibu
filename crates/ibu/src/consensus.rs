@@ -48,14 +48,10 @@
 //! # }
 //! ```
 
-use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::ops::AddAssign;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
 
-use crate::umi::BarcodeSetReader;
+use crate::barcode_set::process_barcode_sets_parallel;
 use crate::{ExtIbuRecord, Reader, Writer};
 
 /// Statistics of a consensus consolidation pass.
@@ -160,15 +156,14 @@ pub fn consensus_barcode_set<T: ExtIbuRecord>(barcode_set: &mut [T]) -> usize {
     n_consolidated
 }
 
-/// A batch of consolidated records tagged with its ticket, reassembled in
-/// input order by the writer thread.
-type TicketedBatch<T> = (usize, Vec<T>);
-
 /// Consolidates sequences across an entire sorted record stream in parallel.
 ///
-/// Worker threads pull barcode sets off a shared reader and consolidate them
-/// independently; a dedicated writer thread reassembles the results in input
-/// order via tickets, so output is deterministic across thread counts.
+/// A thin wrapper over
+/// [`process_barcode_sets_parallel`](crate::barcode_set::process_barcode_sets_parallel):
+/// worker threads pull barcode sets off a shared reader and consolidate them
+/// independently with [`consensus_barcode_set`]; a dedicated writer thread
+/// reassembles the results in input order, so output is deterministic across
+/// thread counts.
 ///
 /// Consolidation preserves sortedness, so callers should mark the output
 /// header as sorted (see the module example).
@@ -194,96 +189,13 @@ where
     R: Read + Send,
     W: Write + Send,
 {
-    let threads = if threads == 0 {
-        std::thread::available_parallelism().map_or(1, |n| n.get())
-    } else {
-        threads.max(1)
-    };
+    let stats = process_barcode_sets_parallel(reader, writer, threads, |barcode_set| {
+        Ok(consensus_barcode_set(barcode_set))
+    })?;
 
-    let preader = BarcodeSetReader::new_shared(reader.records::<T>()?);
-    let ticket_counter = Arc::new(AtomicUsize::new(0));
-
-    let (tx, rx): (Sender<TicketedBatch<T>>, Receiver<TicketedBatch<T>>) = channel();
-
-    std::thread::scope(|scope| -> crate::Result<ConsensusStats> {
-        // Writer thread: reassembles barcode sets in ticket order
-        let writer_handle = scope.spawn(move || -> crate::Result<()> {
-            let mut next_expected = 0;
-            let mut buffer: BTreeMap<usize, Vec<T>> = BTreeMap::new();
-
-            for (ticket, records) in rx {
-                buffer.insert(ticket, records);
-
-                // Write all sequential batches we have
-                while let Some(records) = buffer.remove(&next_expected) {
-                    writer.write_batch(&records)?;
-                    next_expected += 1;
-                }
-            }
-            writer.finish()?;
-            Ok(())
-        });
-
-        // Worker threads: pull barcode sets, consolidate, and ship with a ticket
-        let mut handles = Vec::new();
-        for _ in 0..threads {
-            let treader = preader.clone();
-            let ticket_counter = ticket_counter.clone();
-            let tx = tx.clone();
-
-            handles.push(scope.spawn(move || -> crate::Result<ConsensusStats> {
-                let mut stats = ConsensusStats::default();
-                let mut barcode_set: Vec<T> = Vec::new();
-
-                loop {
-                    let my_ticket = {
-                        let mut reader = treader.lock();
-
-                        // Try to read first
-                        if !reader.fill_barcode_set(&mut barcode_set)? {
-                            break;
-                        }
-
-                        // Get ticket while still holding the lock
-                        ticket_counter.fetch_add(1, Ordering::SeqCst)
-                    }; // Lock released here
-
-                    stats.total += barcode_set
-                        .iter()
-                        .map(|r| r.count() as usize)
-                        .sum::<usize>();
-                    stats.consolidated += consensus_barcode_set(&mut barcode_set);
-
-                    // Send to writer; a closed channel means the writer failed,
-                    // and its error is surfaced from its join below
-                    if tx
-                        .send((my_ticket, std::mem::take(&mut barcode_set)))
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-
-                Ok(stats)
-            }));
-        }
-
-        drop(tx); // Close the channel once all workers have finished
-
-        let mut stats = ConsensusStats::default();
-        let mut first_error = None;
-        for handle in handles {
-            match handle.join().expect("worker thread panicked") {
-                Ok(worker_stats) => stats += worker_stats,
-                Err(e) => first_error = first_error.or(Some(e)),
-            }
-        }
-        writer_handle.join().expect("writer thread panicked")?;
-        if let Some(e) = first_error {
-            return Err(e);
-        }
-
-        Ok(stats)
+    Ok(ConsensusStats {
+        total: stats.total,
+        consolidated: stats.modified,
     })
 }
 

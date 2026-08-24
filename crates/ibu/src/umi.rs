@@ -8,9 +8,10 @@
 //! stored counts.
 //!
 //! The main entry point is [`correct_umis_parallel`], which drives an entire
-//! reader-to-writer correction. The building blocks ([`BarcodeSetReader`],
-//! [`collapse_barcode_set`], [`collapse_index_set`]) are public so custom
-//! pipelines can compose them differently.
+//! reader-to-writer correction over the shared
+//! [`process_barcode_sets_parallel`](crate::barcode_set::process_barcode_sets_parallel)
+//! path. The building blocks ([`collapse_barcode_set`], [`collapse_index_set`])
+//! are public so custom pipelines can compose them differently.
 //!
 //! # Examples
 //!
@@ -44,13 +45,9 @@
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::ops::AddAssign;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
 
-use parking_lot::Mutex;
-
-use crate::{IbuError, IbuRecord, IntoIbuError, Reader, Writer};
+use crate::barcode_set::process_barcode_sets_parallel;
+use crate::{IbuRecord, IntoIbuError, Reader, Writer};
 
 /// Statistics of a UMI correction pass.
 ///
@@ -246,74 +243,14 @@ pub fn collapse_barcode_set<T: IbuRecord>(
     Ok(n_corrections)
 }
 
-/// Shared reader that yields batches of records grouped by barcode.
-///
-/// Enforces that the input stream is sorted, returning
-/// [`IbuError::ExpectingSortedIbu`] on the first out-of-order record.
-pub struct BarcodeSetReader<T, I>
-where
-    T: IbuRecord,
-    I: Iterator<Item = Result<T, IbuError>>,
-{
-    reader: I,
-    remainder: Option<T>,
-}
-impl<T, I> BarcodeSetReader<T, I>
-where
-    T: IbuRecord,
-    I: Iterator<Item = Result<T, IbuError>>,
-{
-    pub fn new(reader: I) -> Self {
-        Self {
-            reader,
-            remainder: None,
-        }
-    }
-
-    /// Wraps the reader in a shareable mutex for multi-threaded consumption.
-    pub fn new_shared(reader: I) -> Arc<Mutex<Self>> {
-        Arc::new(Mutex::new(Self::new(reader)))
-    }
-
-    /// Fills a vector with records sharing a barcode.
-    ///
-    /// Returns true if the vector is not empty, false if the reader is exhausted.
-    pub fn fill_barcode_set(&mut self, bset: &mut Vec<T>) -> crate::Result<bool> {
-        let mut last_record = None;
-        if let Some(record) = self.remainder.take() {
-            last_record = Some(record);
-            bset.push(record);
-        }
-        for record in self.reader.by_ref() {
-            let record = record?;
-            if let Some(last) = last_record {
-                if record < last {
-                    return Err(IbuError::ExpectingSortedIbu);
-                }
-                if record.barcode() == last.barcode() {
-                    bset.push(record);
-                } else {
-                    self.remainder = Some(record);
-                    break;
-                }
-            } else {
-                bset.push(record);
-            }
-            last_record = Some(record);
-        }
-        Ok(!bset.is_empty())
-    }
-}
-
-/// A batch of corrected records tagged with its ticket, reassembled in input
-/// order by the writer thread.
-type TicketedBatch<T> = (usize, Vec<T>);
-
 /// Corrects UMIs across an entire sorted record stream in parallel.
 ///
-/// Worker threads pull barcode sets off a shared reader and correct them
-/// independently; a dedicated writer thread reassembles the results in input
-/// order via tickets, so output is deterministic across thread counts.
+/// A thin wrapper over
+/// [`process_barcode_sets_parallel`](crate::barcode_set::process_barcode_sets_parallel):
+/// worker threads pull barcode sets off a shared reader and correct them
+/// independently with [`collapse_barcode_set`]; a dedicated writer thread
+/// reassembles the results in input order, so output is deterministic across
+/// thread counts.
 ///
 /// Correction preserves sortedness: barcode sets arrive in order and each is
 /// re-sorted after its UMIs are rewritten. Callers should therefore mark the
@@ -340,111 +277,28 @@ where
     R: Read + Send,
     W: Write + Send,
 {
-    let threads = if threads == 0 {
-        std::thread::available_parallelism().map_or(1, |n| n.get())
-    } else {
-        threads.max(1)
-    };
     let umi_len = reader.header().umi_len as usize;
 
-    let preader = BarcodeSetReader::new_shared(reader.records::<T>()?);
-    let ticket_counter = Arc::new(AtomicUsize::new(0));
+    let stats = process_barcode_sets_parallel(reader, writer, threads, |barcode_set| {
+        let mut corrected_set = Vec::with_capacity(barcode_set.len());
+        let n_corrected = collapse_barcode_set(barcode_set, &mut corrected_set, umi_len)?;
 
-    let (tx, rx): (Sender<TicketedBatch<T>>, Receiver<TicketedBatch<T>>) = channel();
+        // Restore full record ordering within the barcode set
+        corrected_set.sort_unstable();
+        *barcode_set = corrected_set;
+        Ok(n_corrected)
+    })?;
 
-    std::thread::scope(|scope| -> crate::Result<UmiCorrectionStats> {
-        // Writer thread: reassembles barcode sets in ticket order
-        let writer_handle = scope.spawn(move || -> crate::Result<()> {
-            let mut next_expected = 0;
-            let mut buffer: BTreeMap<usize, Vec<T>> = BTreeMap::new();
-
-            for (ticket, records) in rx {
-                buffer.insert(ticket, records);
-
-                // Write all sequential batches we have
-                while let Some(records) = buffer.remove(&next_expected) {
-                    writer.write_batch(&records)?;
-                    next_expected += 1;
-                }
-            }
-            writer.finish()?;
-            Ok(())
-        });
-
-        // Worker threads: pull barcode sets, correct, and ship with a ticket
-        let mut handles = Vec::new();
-        for _ in 0..threads {
-            let treader = preader.clone();
-            let ticket_counter = ticket_counter.clone();
-            let tx = tx.clone();
-
-            handles.push(scope.spawn(move || -> crate::Result<UmiCorrectionStats> {
-                let mut stats = UmiCorrectionStats::default();
-                let mut barcode_set: Vec<T> = Vec::new();
-                let mut corrected_set: Vec<T> = Vec::new();
-
-                loop {
-                    barcode_set.clear();
-
-                    let my_ticket = {
-                        let mut reader = treader.lock();
-
-                        // Try to read first
-                        if !reader.fill_barcode_set(&mut barcode_set)? {
-                            break;
-                        }
-
-                        // Get ticket while still holding the lock
-                        ticket_counter.fetch_add(1, Ordering::SeqCst)
-                    }; // Lock released here
-
-                    stats.total += barcode_set
-                        .iter()
-                        .map(|r| r.count() as usize)
-                        .sum::<usize>();
-                    stats.corrected +=
-                        collapse_barcode_set(&mut barcode_set, &mut corrected_set, umi_len)?;
-
-                    // Restore full record ordering within the barcode set
-                    corrected_set.sort_unstable();
-
-                    // Send to writer; a closed channel means the writer failed,
-                    // and its error is surfaced from its join below
-                    if tx
-                        .send((my_ticket, std::mem::take(&mut corrected_set)))
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-
-                Ok(stats)
-            }));
-        }
-
-        drop(tx); // Close the channel once all workers have finished
-
-        let mut stats = UmiCorrectionStats::default();
-        let mut first_error = None;
-        for handle in handles {
-            match handle.join().expect("worker thread panicked") {
-                Ok(worker_stats) => stats += worker_stats,
-                Err(e) => first_error = first_error.or(Some(e)),
-            }
-        }
-        writer_handle.join().expect("writer thread panicked")?;
-        if let Some(e) = first_error {
-            return Err(e);
-        }
-
-        Ok(stats)
+    Ok(UmiCorrectionStats {
+        total: stats.total,
+        corrected: stats.modified,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Header, Record, RecordCount};
+    use crate::{Header, IbuError, Record, RecordCount};
     use std::io::Cursor;
 
     fn rec(umi: u64) -> Record {

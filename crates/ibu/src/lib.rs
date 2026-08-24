@@ -69,6 +69,12 @@
 //!   extended streams, rewriting each (barcode, UMI, index) group's sequences
 //!   to the group's most abundant variant
 //!
+//! The two parallel routines are thin wrappers over
+//! [`barcode_set::process_barcode_sets_parallel`], which fans barcode sets out
+//! to worker threads and reassembles their output deterministically - new
+//! per-barcode transformations only need to supply the per-set processing
+//! function.
+//!
 //! ## Basic Usage
 //!
 //! ### Writing and Reading Records
@@ -214,6 +220,7 @@
 //! # }
 //! ```
 
+pub mod barcode_set;
 pub mod consensus;
 mod constructs;
 mod dedup;
