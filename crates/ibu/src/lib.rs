@@ -4,8 +4,8 @@
 //! in high-throughput genomics applications. It provides fast, memory-efficient I/O operations
 //! with support for parallel processing and memory-mapped files.
 //!
-//! The library is heavily inspired by the [BUS binary format](https://github.com/BUStools/BUS-format)
-//! but provides a more minimal and performant implementation.
+//! The format is heavily inspired by the [BUS binary format](https://github.com/BUStools/BUS-format)
+//! but has been designed for extensions into other applications.
 //!
 //! ## Format Specification
 //!
@@ -277,7 +277,7 @@ pub use dedup::{dedup_sorted, merge_counted_records, DedupExt, DedupResults, Ded
 pub use error::{IbuError, IntoIbuError, Result};
 #[cfg(feature = "ext-sort")]
 pub use external_chunk::{external_sort, IbuExternalChunk};
-pub use io::{load_to_vec, MmapReader, Reader, Writer};
+pub use io::{load_to_vec, MmapReader, Reader, RecordIter, Writer};
 pub use parallel::{ParallelProcessor, ParallelReader};
 
 /// Re-export ext-sort for versioning compatibility

@@ -176,8 +176,7 @@ pub fn consensus_barcode_set<T: ExtIbuRecord>(barcode_set: &mut Vec<T>) -> usize
 
 /// Consolidates sequences across an entire sorted record stream in parallel.
 ///
-/// A thin wrapper over
-/// [`process_barcode_sets_parallel`](crate::barcode_set::process_barcode_sets_parallel):
+/// A thin wrapper over [`process_barcode_sets_parallel`]:
 /// worker threads pull barcode sets off a shared reader and consolidate them
 /// independently with [`consensus_barcode_set`]; a dedicated writer thread
 /// reassembles the results in input order, so output is deterministic across

@@ -6,12 +6,10 @@
 //! neighbor, correcting sequencing errors in the UMI. Abundance is measured in
 //! reads (summed record multiplicities), so counted records weigh by their
 //! stored counts. Counted streams also stay deduplicated: records left sharing
-//! a payload after correction are merged with
-//! [`merge_counted_records`](crate::merge_counted_records).
+//! a payload after correction are merged with [`merge_counted_records`].
 //!
 //! The main entry point is [`correct_umis_parallel`], which drives an entire
-//! reader-to-writer correction over the shared
-//! [`process_barcode_sets_parallel`](crate::barcode_set::process_barcode_sets_parallel)
+//! reader-to-writer correction over the shared [`process_barcode_sets_parallel`]
 //! path. The building blocks ([`collapse_barcode_set`], [`collapse_index_set`])
 //! are public so custom pipelines can compose them differently.
 //!
@@ -247,8 +245,7 @@ pub fn collapse_barcode_set<T: IbuRecord>(
 
 /// Corrects UMIs across an entire sorted record stream in parallel.
 ///
-/// A thin wrapper over
-/// [`process_barcode_sets_parallel`](crate::barcode_set::process_barcode_sets_parallel):
+/// A thin wrapper over [`process_barcode_sets_parallel`]:
 /// worker threads pull barcode sets off a shared reader and correct them
 /// independently with [`collapse_barcode_set`]; a dedicated writer thread
 /// reassembles the results in input order, so output is deterministic across

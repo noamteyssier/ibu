@@ -45,7 +45,7 @@ use crate::{IbuError, IbuRecord};
 
 /// External sort chunk that spills IBU records as raw fixed-size bytes.
 ///
-/// Generic over any [`IbuRecord`] type. See the [module docs](self) for usage.
+/// Generic over any [`IbuRecord`] type. See the module docs for usage.
 pub struct IbuExternalChunk<T> {
     reader: io::Take<io::BufReader<fs::File>>,
     /// Scratch buffer of exactly `T::SIZE` bytes for reading single records
