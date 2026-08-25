@@ -51,7 +51,7 @@ use std::ops::AddAssign;
 use crate::barcode_set::{
     process_barcode_sets_parallel, process_barcode_sets_parallel_iter, ParallelBarcodeSets,
 };
-use crate::{merge_counted_records, IbuError, IbuRecord, IntoIbuError, Reader, Writer};
+use crate::{merge_counted_records, IbuError, IbuRecord, Reader, Writer};
 
 /// Statistics of a UMI correction pass.
 ///
@@ -164,7 +164,7 @@ pub fn collapse_index_set<T: IbuRecord>(
     for i in 0..n_unique {
         for j in i + 1..n_unique {
             let hdist = bitnuc::hdist_scalar(unique_umis[i], unique_umis[j], umi_len)
-                .map_err(IntoIbuError::into_ibu_error)?;
+                .map_err(IbuError::process)?;
             if hdist <= 1 {
                 uf.union(i, j);
                 n_edges += 1;
