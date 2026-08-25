@@ -154,44 +154,13 @@ impl<W: Write, T: IbuRecord> Writer<W, T> {
         let header_bytes: &[u8] = bytemuck::bytes_of(&header);
         inner.write_all(header_bytes)?;
 
-        Ok(Self::new_headless(inner))
-    }
-
-    /// Creates a new writer without writing a header.
-    ///
-    /// This creates a writer that only writes record data, without the IBU header.
-    /// Useful for appending to existing files or creating partial data streams.
-    ///
-    /// # Arguments
-    ///
-    /// * `inner` - The data sink to write to
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use ibu::{Record, Writer};
-    ///
-    /// let buffer = Vec::new();
-    /// let mut writer = Writer::new_headless(buffer);
-    ///
-    /// let record = Record::new(1, 2, 3);
-    /// writer.write_record(&record).unwrap();
-    /// writer.finish().unwrap();
-    ///
-    /// let buffer = writer.into_inner();
-    /// assert_eq!(buffer.len(), 24); // Just one record, no header
-    /// ```
-    pub fn new_headless(inner: W) -> Self {
-        // Initialize buffer
-        let buffer = vec![0u8; DEFAULT_BUFFER_RECORDS * T::SIZE];
-
-        Self {
+        Ok(Self {
             inner,
-            buffer,
+            buffer: vec![0u8; DEFAULT_BUFFER_RECORDS * T::SIZE],
             pos: 0,
             records_written: 0,
             _record: PhantomData,
-        }
+        })
     }
 
     /// Returns the number of records written so far.
@@ -448,55 +417,6 @@ impl<W: Write, T: IbuRecord> Writer<W, T> {
         Ok(())
     }
 
-    /// Ingests records from another writer.
-    ///
-    /// This method takes records that have been written to another writer
-    /// (with a `Vec<u8>` backing) and merges them into this writer. The
-    /// source writer is cleared after ingestion.
-    ///
-    /// This is useful for parallel writing patterns where multiple threads
-    /// write to separate buffers that are later merged.
-    ///
-    /// # Arguments
-    ///
-    /// * `other` - The writer to ingest from (must use `Vec<u8>` as backing)
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - Flushing the source writer fails
-    /// - Writing the ingested data fails
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use ibu::{Header, Record, Writer};
-    ///
-    /// # fn main() -> ibu::Result<()> {
-    /// let header = Header::new(16, 12);
-    ///
-    /// // Main writer
-    /// let buffer = Vec::new();
-    /// let mut main_writer = Writer::new(buffer, header)?;
-    ///
-    /// // Auxiliary writer (headless to avoid including header in ingest)
-    /// let aux_buffer = Vec::new();
-    /// let mut aux_writer = Writer::new_headless(aux_buffer);
-    /// aux_writer.write_record(&Record::new(1, 2, 3))?;
-    ///
-    /// // Ingest auxiliary writer's data
-    /// main_writer.ingest(&mut aux_writer)?;
-    /// assert_eq!(main_writer.records_written(), 1);
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn ingest(&mut self, other: &mut Writer<Vec<u8>, T>) -> crate::Result<()> {
-        other.flush_buffer()?;
-        self.write_slice(&other.inner)?;
-        other.inner.clear();
-        Ok(())
-    }
-
     /// Consumes the writer and returns the underlying writer.
     ///
     /// This method allows access to the underlying writer after the IBU writer
@@ -663,18 +583,6 @@ mod tests {
     }
 
     #[test]
-    fn test_writer_headless() {
-        let buffer = Vec::new();
-        let writer: Writer<_, Record> = Writer::new_headless(buffer);
-
-        assert_eq!(writer.records_written(), 0);
-
-        // Should not have written header
-        let buffer = writer.into_inner();
-        assert_eq!(buffer.len(), 0);
-    }
-
-    #[test]
     fn test_single_record_write() {
         let header = Header::new(16, 12);
         let buffer = Vec::new();
@@ -733,28 +641,6 @@ mod tests {
 
         writer.write_batch(&large_batch).unwrap();
         assert_eq!(writer.records_written(), 100_000);
-    }
-
-    #[test]
-    fn test_writer_ingest() {
-        let header = Header::new(16, 12);
-
-        // Main writer
-        let main_buffer = Vec::new();
-        let mut main_writer = Writer::new(main_buffer, header).unwrap();
-
-        // Auxiliary writer (headless to avoid including header in ingest)
-        let aux_buffer = Vec::new();
-        let mut aux_writer = Writer::new_headless(aux_buffer);
-        aux_writer.write_record(&Record::new(1, 2, 3)).unwrap();
-        aux_writer.write_record(&Record::new(4, 5, 6)).unwrap();
-
-        // Ingest
-        main_writer.ingest(&mut aux_writer).unwrap();
-        assert_eq!(main_writer.records_written(), 2);
-
-        // Aux writer should be cleared
-        assert!(aux_writer.inner.is_empty());
     }
 
     #[test]
