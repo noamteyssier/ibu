@@ -63,7 +63,7 @@ fn test_sort_default_output_path() {
     let out = ibu_bin().arg("sort").arg(&input).output().unwrap();
     assert!(out.status.success());
     assert!(
-        String::from_utf8_lossy(&out.stderr).contains("Writing sorted output to:"),
+        String::from_utf8_lossy(&out.stderr).contains("Writing output to:"),
         "derived output path should be announced on stderr"
     );
 

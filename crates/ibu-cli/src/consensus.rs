@@ -1,9 +1,8 @@
 use anyhow::{bail, Context, Result};
 use ibu::consensus::{consensus_parallel, ConsensusStats};
 use ibu::{ExtIbuRecord, ExtRecord, ExtRecordCount, Reader, Writer};
-use std::io::Write;
 
-use crate::utils::{match_output, Input, Output};
+use crate::utils::{match_output, resolve_output, write_stats_log, Input, Output};
 
 #[derive(clap::Parser, Debug)]
 pub struct ArgsConsensus {
@@ -55,30 +54,13 @@ fn consensus_typed<T: ExtIbuRecord>(
     Ok(stats)
 }
 
-/// Derives the default output path for a consolidated file: `x.ibu` -> `x.consensus.ibu`.
-fn derive_consensus_path(input: &str) -> String {
-    let stem = input.strip_suffix(".ibu").unwrap_or(input);
-    format!("{stem}.consensus.ibu")
-}
-
-/// Resolves the output target: explicit path, stdout pipe, or a path derived
-/// from the input filename.
-fn resolve_output(args: &ArgsConsensus) -> Result<Option<String>> {
-    if args.pipe {
-        Ok(None)
-    } else if let Some(output) = &args.output {
-        Ok(Some(output.clone()))
-    } else if let Some(input) = &args.input {
-        let derived = derive_consensus_path(input);
-        eprintln!("Writing consolidated output to: {derived}");
-        Ok(Some(derived))
-    } else {
-        bail!("Reading from stdin requires an output target: pass -o/--output or -p/--pipe")
-    }
-}
-
 pub fn run(args: &ArgsConsensus) -> Result<()> {
-    let output_path = resolve_output(args)?;
+    let output_path = resolve_output(
+        args.input.as_ref(),
+        args.output.as_ref(),
+        args.pipe,
+        "consensus",
+    )?;
     let reader = Reader::from_optional_path(args.input.as_ref())?;
     let header = reader.header();
     let output = match_output(output_path.as_ref())
@@ -93,28 +75,5 @@ pub fn run(args: &ArgsConsensus) -> Result<()> {
         consensus_typed::<ExtRecord>(args, reader, output)?
     };
 
-    // Write consolidation statistics as JSON [default=stderr]
-    let mut log: Output = match args.log.as_ref() {
-        Some(path) => match_output(Some(path))?,
-        None => Box::new(std::io::stderr()),
-    };
-    writeln!(log, "{}", stats_json(stats))?;
-    log.flush()?;
-
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::derive_consensus_path;
-
-    #[test]
-    fn test_derive_consensus_path() {
-        assert_eq!(derive_consensus_path("data.ibu"), "data.consensus.ibu");
-        assert_eq!(
-            derive_consensus_path("data.umi.ibu"),
-            "data.umi.consensus.ibu"
-        );
-        assert_eq!(derive_consensus_path("data"), "data.consensus.ibu");
-    }
+    write_stats_log(args.log.as_ref(), &stats_json(stats))
 }
