@@ -25,7 +25,7 @@ pub struct ArgsSort {
     pub pipe: bool,
 
     /// Memory limit for the sort buffer, in MiB
-    #[clap(short, long, default_value_t = 5120)]
+    #[clap(short, long, default_value_t = 5 * 1024)]
     pub memory_limit_mb: u64,
 
     /// Perform the sorting in-memory [default: on-disk merge sort]
