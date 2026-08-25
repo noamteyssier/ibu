@@ -17,13 +17,11 @@ bytemuck = { workspace = true }
 ext-sort = { workspace = true, optional = true }
 memmap2 = { workspace = true }
 niffler = { workspace = true, optional = true }
-num_cpus = { workspace = true }
-parking_lot = { workspace = true }
 serde = { workspace = true, optional = true }
 thiserror = { workspace = true }
 
 [features]
-default = ["serde", "niffler", "ext-sort"]
+default = ["niffler", "ext-sort"]
 serde = ["dep:serde"]
 niffler = ["dep:niffler"]
 ext-sort = ["dep:ext-sort"]
