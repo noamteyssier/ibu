@@ -118,6 +118,22 @@ pub trait IbuRecord: Pod + Eq + Ord + Hash + Debug + Send + Sync {
     ///
     /// For counted types this replaces the stored count.
     fn to_counted(&self, count: u64) -> Self::Counted;
+
+    /// Returns the record as a byte slice (zero-copy, via `bytemuck`).
+    #[inline(always)]
+    fn as_bytes(&self) -> &[u8] {
+        bytemuck::bytes_of(self)
+    }
+
+    /// Creates a record from a byte slice.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the input slice is not exactly [`SIZE`](IbuRecord::SIZE) bytes.
+    #[inline(always)]
+    fn from_bytes(bytes: &[u8]) -> Self {
+        bytemuck::pod_read_unaligned(bytes)
+    }
 }
 
 /// Trait for extended record types carrying a 2-bit packed sequence payload.

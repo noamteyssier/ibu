@@ -1,6 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 
-use crate::{ExtIbuRecord, IbuError, IbuRecord, IntoIbuError};
+use crate::{ExtIbuRecord, IbuError, IbuRecord};
 
 pub const EXT_RECORD_SIZE: usize = std::mem::size_of::<ExtRecord>();
 
@@ -39,7 +39,7 @@ pub type ExtRecordBuffer = [u8; 32];
 /// # Examples
 ///
 /// ```rust
-/// use ibu::ExtRecord;
+/// use ibu::{ExtRecord, IbuRecord};
 ///
 /// // Pack a gap-fill sequence into a record
 /// let record = ExtRecord::from_sequence(0x1234, 0x5678, 42, b"ACGTACGT").unwrap();
@@ -113,7 +113,7 @@ impl ExtRecord {
             });
         }
         let mut seq_buf = ExtRecordBuffer::default();
-        bitnuc::encode(seq, &mut seq_buf).map_err(|e| e.into_ibu_error())?;
+        bitnuc::encode(seq, &mut seq_buf).map_err(IbuError::process)?;
         Ok(Self::new(barcode, umi, index, seq.len() as u64, seq_buf))
     }
 
@@ -130,27 +130,8 @@ impl ExtRecord {
     /// ```
     pub fn decode_sequence(&self) -> Result<ExtRecordBufferAscii, IbuError> {
         let buf = ExtRecordBufferAscii::new(&self.seq_buf, self.seq_len as usize)
-            .map_err(IntoIbuError::into_ibu_error)?;
+            .map_err(IbuError::process)?;
         Ok(buf)
-    }
-
-    /// Returns the record as a byte slice.
-    ///
-    /// Uses zero-copy conversion via `bytemuck` to get a view of the record
-    /// as bytes, suitable for writing to files or network streams.
-    pub fn as_bytes(&self) -> &[u8] {
-        bytemuck::bytes_of(self)
-    }
-
-    /// Creates a record from a byte slice.
-    ///
-    /// Uses zero-copy conversion via `bytemuck` to interpret bytes as an ExtRecord.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the input slice is not exactly 64 bytes.
-    pub fn from_bytes(bytes: &[u8]) -> Self {
-        *bytemuck::from_bytes(bytes)
     }
 }
 
@@ -239,8 +220,7 @@ pub struct SeqKey {
 impl SeqKey {
     /// Decodes the packed sequence into an ASCII nucleotide buffer.
     pub fn decode(&self) -> crate::Result<ExtRecordBufferAscii> {
-        ExtRecordBufferAscii::new(&self.seq, self.len as usize)
-            .map_err(IntoIbuError::into_ibu_error)
+        ExtRecordBufferAscii::new(&self.seq, self.len as usize).map_err(IbuError::process)
     }
 }
 

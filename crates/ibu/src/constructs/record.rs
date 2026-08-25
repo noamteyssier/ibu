@@ -36,7 +36,7 @@ pub const RECORD_SIZE: usize = std::mem::size_of::<Record>();
 /// # Examples
 ///
 /// ```rust
-/// use ibu::Record;
+/// use ibu::{IbuRecord, Record};
 ///
 /// // Create a new record
 /// let record = Record::new(0x1234, 0x5678, 42);
@@ -91,45 +91,6 @@ impl Record {
             umi,
             index,
         }
-    }
-    /// Returns the record as a byte slice.
-    ///
-    /// Uses zero-copy conversion via `bytemuck` to get a view of the record
-    /// as bytes, suitable for writing to files or network streams.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use ibu::Record;
-    ///
-    /// let record = Record::new(0x1234, 0x5678, 42);
-    /// let bytes = record.as_bytes();
-    /// assert_eq!(bytes.len(), 24); // RECORD_SIZE
-    /// ```
-    pub fn as_bytes(&self) -> &[u8] {
-        bytemuck::bytes_of(self)
-    }
-    /// Creates a record from a byte slice.
-    ///
-    /// Uses zero-copy conversion via `bytemuck` to interpret bytes as a Record.
-    /// The input slice must be exactly 24 bytes long.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the input slice is not exactly 24 bytes.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use ibu::Record;
-    ///
-    /// let original = Record::new(0x1234, 0x5678, 42);
-    /// let bytes = original.as_bytes();
-    /// let reconstructed = Record::from_bytes(bytes);
-    /// assert_eq!(original, reconstructed);
-    /// ```
-    pub fn from_bytes(bytes: &[u8]) -> Self {
-        *bytemuck::from_bytes(bytes)
     }
 }
 

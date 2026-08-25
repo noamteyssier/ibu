@@ -50,12 +50,6 @@ impl RecordCount {
     pub fn new(record: Record, count: u64) -> Self {
         Self { record, count }
     }
-    pub fn as_bytes(&self) -> &[u8] {
-        bytemuck::bytes_of(self)
-    }
-    pub fn from_bytes(bytes: &[u8]) -> Self {
-        *bytemuck::from_bytes(bytes)
-    }
 }
 impl From<Record> for RecordCount {
     fn from(record: Record) -> Self {
@@ -141,12 +135,6 @@ pub struct ExtRecordCount {
 impl ExtRecordCount {
     pub fn new(record: ExtRecord, count: u64) -> Self {
         Self { record, count }
-    }
-    pub fn as_bytes(&self) -> &[u8] {
-        bytemuck::bytes_of(self)
-    }
-    pub fn from_bytes(bytes: &[u8]) -> Self {
-        *bytemuck::from_bytes(bytes)
     }
 }
 impl From<ExtRecord> for ExtRecordCount {
