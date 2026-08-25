@@ -18,7 +18,6 @@ ibu = { path = "crates/ibu", version = "0.3.0" }
 anyhow = "1.0.100"
 bitnuc = "0.5.2"
 bytemuck = { version = "1.24.0", features = ["derive", "extern_crate_alloc"] }
-bytesize = "2.3.1"
 clap = { version = "4.5.53", features = ["derive"] }
 ext-sort = "0.1.5"
 memmap2 = "0.9.9"
