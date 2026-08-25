@@ -8,7 +8,7 @@ use std::{fs::File, marker::PhantomData, path::Path, sync::Arc, thread};
 
 use memmap2::Mmap;
 
-use crate::{parallel::ParallelReader, Header, IbuError, IbuRecord, Record, HEADER_SIZE};
+use crate::{parallel::ParallelProcessor, Header, IbuError, IbuRecord, Record, HEADER_SIZE};
 
 /// Memory-mapped reader for IBU files.
 ///
@@ -62,7 +62,7 @@ use crate::{parallel::ParallelReader, Header, IbuError, IbuRecord, Record, HEADE
 /// ## Parallel Processing
 ///
 /// ```rust,no_run
-/// use ibu::{MmapReader, ParallelProcessor, ParallelReader, Record};
+/// use ibu::{MmapReader, ParallelProcessor, Record};
 /// use std::sync::{Arc, Mutex};
 ///
 /// #[derive(Clone, Default)]
@@ -291,16 +291,33 @@ impl<T: IbuRecord> MmapReader<T> {
 /// `on_batch_complete()` after each chunk.
 pub const BATCH_SIZE: usize = 1024 * 1024;
 
-impl<T: IbuRecord> ParallelReader<T> for MmapReader<T> {
-    fn process_parallel<P: crate::parallel::ParallelProcessor<T> + Clone + 'static>(
+impl<T: IbuRecord> MmapReader<T> {
+    /// Processes all records in parallel using the specified processor.
+    ///
+    /// Divides the records evenly across the specified number of threads; each
+    /// thread gets its own clone of the processor and processes its range in
+    /// batches of [`BATCH_SIZE`], calling
+    /// [`on_batch_complete`](ParallelProcessor::on_batch_complete) after each.
+    ///
+    /// # Arguments
+    ///
+    /// * `processor` - The processor to use for handling records
+    /// * `num_threads` - Number of threads to use (0 = use all available cores)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the processor fails in `process_record` or
+    /// `on_batch_complete`; the first error stops the entire operation.
+    pub fn process_parallel<P: ParallelProcessor<T> + Clone + 'static>(
         &self,
         processor: P,
         num_threads: usize,
     ) -> crate::Result<()> {
+        let available = std::thread::available_parallelism().map_or(1, |n| n.get());
         let num_threads = if num_threads == 0 {
-            num_cpus::get()
+            available
         } else {
-            num_threads.min(num_cpus::get())
+            num_threads.min(available)
         };
         let records_per_thread = self.len / num_threads;
         let remainder = self.len % num_threads; // for last thread

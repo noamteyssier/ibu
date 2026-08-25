@@ -192,7 +192,7 @@
 //! ### Memory-Mapped Reading with Parallel Processing
 //!
 //! ```rust,no_run
-//! use ibu::{MmapReader, ParallelProcessor, ParallelReader, Record};
+//! use ibu::{MmapReader, ParallelProcessor, Record};
 //! use std::sync::{Arc, Mutex};
 //!
 //! #[derive(Clone, Default)]
@@ -308,11 +308,11 @@ pub use constructs::{
     HEADER_SIZE, MAGIC, MIN_VERSION, RECORD_COUNT_SIZE, RECORD_SIZE, VERSION,
 };
 pub use dedup::{dedup_sorted, merge_counted_records, DedupExt, DedupResults, DedupSorted};
-pub use error::{IbuError, IntoIbuError, Result};
+pub use error::{IbuError, Result};
 #[cfg(feature = "ext-sort")]
 pub use external_chunk::{external_sort, IbuExternalChunk};
 pub use io::{load_to_vec, MmapReader, Reader, RecordIter, Writer};
-pub use parallel::{ParallelProcessor, ParallelReader};
+pub use parallel::ParallelProcessor;
 
 /// Re-export ext-sort for versioning compatibility
 #[cfg(feature = "ext-sort")]

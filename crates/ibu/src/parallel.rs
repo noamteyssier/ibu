@@ -6,7 +6,7 @@
 //!
 //! # Architecture
 //!
-//! The parallel processing system uses a work-stealing approach where:
+//! The parallel processing system uses a static-partitioning approach where:
 //! 1. The input data is divided into chunks across available CPU cores
 //! 2. Each thread gets its own clone of the processor
 //! 3. Records are processed in batches to minimize synchronization overhead
@@ -162,137 +162,6 @@ pub trait ParallelProcessor<T: IbuRecord = Record>: Send + Clone {
     fn on_batch_complete(&mut self) -> Result<()> {
         Ok(())
     }
-
-    /// Sets the thread ID for this processor instance.
-    ///
-    /// Called once per thread before processing begins. Can be useful for:
-    /// - Thread-specific logging or debugging
-    /// - Implementing thread-aware algorithms
-    /// - Performance profiling per thread
-    ///
-    /// The default implementation does nothing.
-    ///
-    /// # Arguments
-    ///
-    /// * `tid` - Thread ID (0-based index)
-    #[allow(unused_variables)]
-    fn set_tid(&mut self, tid: usize) {
-        // Default implementation does nothing
-    }
-
-    /// Returns the thread ID for this processor instance.
-    ///
-    /// Returns `None` by default. Implement this if you store the thread ID
-    /// in `set_tid`.
-    fn get_tid(&self) -> Option<usize> {
-        None
-    }
-}
-
-/// Trait for IBU readers that can process records in parallel.
-///
-/// This trait is implemented by readers that can efficiently distribute records
-/// across multiple threads for parallel processing. Currently implemented by
-/// [`MmapReader`](crate::MmapReader) for memory-mapped file access.
-///
-/// # Threading Model
-///
-/// The parallel processing uses a divide-and-conquer approach:
-/// 1. The total number of records is divided evenly across threads
-/// 2. Each thread processes its assigned range independently
-/// 3. Within each thread, records are processed in batches for efficiency
-/// 4. Results are aggregated through the processor's `on_batch_complete` method
-///
-/// # Performance
-///
-/// Parallel processing typically scales linearly with the number of CPU cores
-/// for CPU-bound operations. For I/O-bound operations, the benefits depend on
-/// the underlying storage system.
-///
-/// # Examples
-///
-/// ```rust,no_run
-/// use ibu::{MmapReader, ParallelProcessor, ParallelReader, Record};
-/// use std::sync::{Arc, Mutex};
-///
-/// #[derive(Clone, Default)]
-/// struct SimpleCounter {
-///     local: u64,
-///     global: Arc<Mutex<u64>>,
-/// }
-///
-/// impl ParallelProcessor for SimpleCounter {
-///     fn process_record(&mut self, _record: Record) -> ibu::Result<()> {
-///         self.local += 1;
-///         Ok(())
-///     }
-///
-///     fn on_batch_complete(&mut self) -> ibu::Result<()> {
-///         *self.global.lock().unwrap() += self.local;
-///         self.local = 0;
-///         Ok(())
-///     }
-/// }
-///
-/// # fn main() -> ibu::Result<()> {
-/// let reader = MmapReader::new("data.ibu")?;
-/// let counter = SimpleCounter::default();
-///
-/// // Process with 4 threads
-/// reader.process_parallel(counter.clone(), 4)?;
-///
-/// // Check results
-/// let total = *counter.global.lock().unwrap();
-/// println!("Processed {} records", total);
-/// # Ok(())
-/// # }
-/// ```
-pub trait ParallelReader<T: IbuRecord = Record> {
-    /// Processes all records in parallel using the specified processor.
-    ///
-    /// Divides the records across the specified number of threads and processes
-    /// them in parallel. Each thread gets its own clone of the processor.
-    ///
-    /// # Arguments
-    ///
-    /// * `processor` - The processor to use for handling records
-    /// * `num_threads` - Number of threads to use (0 = use all available cores)
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - Any thread encounters a processing error
-    /// - Thread creation or coordination fails
-    /// - The processor returns an error from `process_record` or `on_batch_complete`
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use ibu::{MmapReader, ParallelProcessor, ParallelReader, Record};
-    ///
-    /// #[derive(Clone, Default)]
-    /// struct NoOpProcessor;
-    ///
-    /// impl ParallelProcessor for NoOpProcessor {
-    ///     fn process_record(&mut self, _record: Record) -> ibu::Result<()> {
-    ///         Ok(()) // Do nothing
-    ///     }
-    /// }
-    ///
-    /// # fn main() -> ibu::Result<()> {
-    /// let reader = MmapReader::new("data.ibu")?;
-    /// let processor = NoOpProcessor::default();
-    ///
-    /// // Use all available cores
-    /// reader.process_parallel(processor, 0)?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    fn process_parallel<P: ParallelProcessor<T> + Clone + 'static>(
-        &self,
-        processor: P,
-        num_threads: usize,
-    ) -> Result<()>;
 }
 
 #[cfg(test)]
@@ -307,7 +176,6 @@ mod tests {
         local_sum: u64,
         global_count: Arc<AtomicU64>,
         global_sum: Arc<AtomicU64>,
-        tid: Option<usize>,
     }
 
     impl ParallelProcessor for TestProcessor {
@@ -324,14 +192,6 @@ mod tests {
             self.local_count = 0;
             self.local_sum = 0;
             Ok(())
-        }
-
-        fn set_tid(&mut self, tid: usize) {
-            self.tid = Some(tid);
-        }
-
-        fn get_tid(&self) -> Option<usize> {
-            self.tid
         }
     }
 
@@ -355,11 +215,6 @@ mod tests {
     fn test_processor_basic_functionality() {
         let processor = TestProcessor::default();
         let mut processor_clone = processor.clone();
-
-        // Test set_tid and get_tid
-        assert_eq!(processor_clone.get_tid(), None);
-        processor_clone.set_tid(42);
-        assert_eq!(processor_clone.get_tid(), Some(42));
 
         // Test processing records
         let record1 = Record::new(1, 2, 3);
@@ -392,20 +247,12 @@ mod tests {
         is_clone::<TestProcessor>();
 
         // Test actual cloning
-        let clone1 = processor.clone();
+        let mut clone1 = processor.clone();
         let clone2 = processor.clone();
 
-        // Clones should have independent local state
-        let mut clone1 = clone1;
-        let mut clone2 = clone2;
-
-        clone1.set_tid(1);
-        clone2.set_tid(2);
-
-        assert_eq!(clone1.get_tid(), Some(1));
-        assert_eq!(clone2.get_tid(), Some(2));
-
-        // But share global state
+        // Clones have independent local state but share global state
+        clone1.local_count = 5;
+        assert_eq!(clone2.local_count, 0);
         assert!(Arc::ptr_eq(&clone1.global_count, &clone2.global_count));
         assert!(Arc::ptr_eq(&clone1.global_sum, &clone2.global_sum));
     }
@@ -450,11 +297,6 @@ mod tests {
 
         // Test default implementations
         assert!(processor.on_batch_complete().is_ok());
-        assert_eq!(processor.get_tid(), None);
-
-        // set_tid should not panic
-        processor.set_tid(123);
-        assert_eq!(processor.get_tid(), None); // Still None with default impl
     }
 
     #[test]

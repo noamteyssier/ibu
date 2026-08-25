@@ -6,7 +6,7 @@ use anyhow::{bail, Context, Result};
 use ibu::count::{BarcodeUmiCounter, BarcodeUmiCounts, UmiCountStats};
 use ibu::{with_record_type, Header, IbuError, IbuRecord, Reader};
 
-use crate::utils::{load_features, match_output, Input, Output};
+use crate::utils::{load_features, match_output, write_stats_log, Input, Output};
 
 #[derive(clap::Parser, Debug)]
 pub struct ArgsCount {
@@ -303,15 +303,7 @@ pub fn run(args: &ArgsCount) -> Result<()> {
         )?;
     }
 
-    // Write counting statistics as JSON [default=stderr]
-    let mut log: Output = match args.log.as_ref() {
-        Some(path) => match_output(Some(path))?,
-        None => Box::new(std::io::stderr()),
-    };
-    writeln!(log, "{}", stats_json(counts.stats()))?;
-    log.flush()?;
-
-    Ok(())
+    write_stats_log(args.log.as_ref(), &stats_json(counts.stats()))
 }
 
 #[cfg(test)]

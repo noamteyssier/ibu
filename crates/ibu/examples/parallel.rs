@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use std::{fs::File, sync::Mutex};
 
-use ibu::{Header, MmapReader, ParallelProcessor, ParallelReader, Record, Writer};
+use ibu::{Header, MmapReader, ParallelProcessor, Record, Writer};
 
 #[derive(Clone, Default)]
 pub struct Processor {

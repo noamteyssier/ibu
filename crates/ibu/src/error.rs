@@ -159,52 +159,14 @@ pub enum IbuError {
     Process(Box<dyn StdError + Send + Sync>),
 }
 
-/// Trait for converting errors into `IbuError::Process` variants.
-///
-/// This trait provides a convenient way to convert custom error types
-/// into IBU errors for use in parallel processing contexts.
-///
-/// # Examples
-///
-/// ```rust
-/// use ibu::{IntoIbuError, IbuError};
-/// use std::fmt;
-///
-/// #[derive(Debug)]
-/// struct CustomError(String);
-///
-/// impl fmt::Display for CustomError {
-///     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-///         write!(f, "Custom error: {}", self.0)
-///     }
-/// }
-///
-/// impl std::error::Error for CustomError {}
-///
-/// // Convert to IbuError
-/// let custom_err = CustomError("something went wrong".to_string());
-/// let ibu_err = custom_err.into_ibu_error();
-///
-/// match ibu_err {
-///     IbuError::Process(_) => println!("Converted successfully"),
-///     _ => unreachable!(),
-/// }
-/// ```
-pub trait IntoIbuError {
-    /// Converts the error into an `IbuError`.
-    fn into_ibu_error(self) -> IbuError;
-}
-
-/// Blanket implementation for all error types.
-///
-/// Any type that implements `std::error::Error + Send + Sync + 'static`
-/// can be automatically converted to `IbuError::Process`.
-impl<E> IntoIbuError for E
-where
-    E: std::error::Error + Send + Sync + 'static,
-{
-    fn into_ibu_error(self) -> IbuError {
-        IbuError::Process(self.into())
+impl IbuError {
+    /// Wraps any error into an [`IbuError::Process`] variant, e.g. for
+    /// propagating custom errors through parallel processing contexts.
+    pub fn process<E>(err: E) -> Self
+    where
+        E: StdError + Send + Sync + 'static,
+    {
+        IbuError::Process(err.into())
     }
 }
 
@@ -317,9 +279,9 @@ mod tests {
     }
 
     #[test]
-    fn test_into_ibu_error_trait() {
+    fn test_process_constructor() {
         let custom_err = CustomError("test".to_string());
-        let ibu_err = custom_err.into_ibu_error();
+        let ibu_err = IbuError::process(custom_err);
 
         match ibu_err {
             IbuError::Process(boxed) => {
@@ -394,7 +356,7 @@ mod tests {
             message: "Processing failed".to_string(),
         };
 
-        let ibu_err = thread_err.into_ibu_error();
+        let ibu_err = IbuError::process(thread_err);
         let display = format!("{}", ibu_err);
 
         assert!(display.contains("Thread 3 error"));

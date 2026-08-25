@@ -21,10 +21,8 @@ use std::io::{Read, Write};
 use std::ops::AddAssign;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-
-use parking_lot::Mutex;
 
 use crate::{IbuError, IbuRecord, Reader, Writer};
 
@@ -187,7 +185,7 @@ where
 
                 loop {
                     let my_ticket = {
-                        let mut reader = treader.lock();
+                        let mut reader = treader.lock().expect("reader lock poisoned");
 
                         // Try to read first
                         if !reader.fill_barcode_set(&mut barcode_set)? {
@@ -312,7 +310,7 @@ where
 
             loop {
                 let my_ticket = {
-                    let mut reader = treader.lock();
+                    let mut reader = treader.lock().expect("reader lock poisoned");
                     match reader.fill_barcode_set(&mut barcode_set) {
                         Ok(false) => break,
                         // Get ticket while still holding the lock

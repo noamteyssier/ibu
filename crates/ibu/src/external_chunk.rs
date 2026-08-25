@@ -129,7 +129,6 @@ where
     T: IbuRecord,
     I: IntoIterator<Item = Result<T, IbuError>>,
 {
-    use crate::IntoIbuError;
     use ext_sort::{ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
 
     let sorter: ExternalSorter<T, IbuError, LimitedBufferBuilder, IbuExternalChunk<T>> =
@@ -137,9 +136,9 @@ where
             .with_buffer(LimitedBufferBuilder::new(chunk_records.max(1), false))
             .with_threads_number(threads.max(1))
             .build()
-            .map_err(IntoIbuError::into_ibu_error)?;
+            .map_err(IbuError::process)?;
 
-    sorter.sort(records).map_err(IntoIbuError::into_ibu_error)
+    sorter.sort(records).map_err(IbuError::process)
 }
 
 #[cfg(test)]
