@@ -14,6 +14,8 @@ This repository provides:
 
 The library is generic over the record type so readers, writers, and routines (sorting, deduplication, parallel processing) work across all record layouts.
 
+For documentation about the cli see [`ibu-cli`](crates/ibu-cli/README.md).
+
 ## Installation
 
 ```bash
