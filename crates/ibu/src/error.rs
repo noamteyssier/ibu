@@ -66,6 +66,7 @@ pub enum IbuError {
     ///
     /// This occurs when there are problems with compressed file formats
     /// like gzip or zstd when the `niffler` feature is enabled.
+    #[cfg(feature = "niffler")]
     #[error("Niffler error")]
     Niffler(#[from] niffler::Error),
 
@@ -86,9 +87,12 @@ pub enum IbuError {
     /// Unsupported file format version.
     ///
     /// The file was created with a different version of the IBU format
-    /// that is not supported by this library version.
-    #[error("Invalid version found, expected ({expected}), found ({actual})")]
-    InvalidVersion { expected: u32, actual: u32 },
+    /// that is not supported by this library version. Note that the
+    /// supported range depends on the record type: classic records are
+    /// readable from version 2 onwards, while extended records require
+    /// version 3.
+    #[error("Invalid version: found ({actual}), supported versions ({min}-{max})")]
+    InvalidVersion { min: u32, max: u32, actual: u32 },
 
     /// Barcode length is outside the valid range (1-32).
     ///
@@ -118,6 +122,34 @@ pub enum IbuError {
     #[error("Invalid index ({idx}) - Must be less than {max}")]
     InvalidIndex { idx: usize, max: usize },
 
+    /// Mismatch between the record type in the file and the requested record type.
+    ///
+    /// IBU files are discriminated along two axes by header flags: extended
+    /// (bit 1) and counted (bit 2). This error reports both axes for the file
+    /// and for the record type the caller requested.
+    #[error("Record type mismatch: file contains (extended={file_extended}, counted={file_counted}) records but (extended={requested_extended}, counted={requested_counted}) records were requested")]
+    RecordTypeMismatch {
+        file_extended: bool,
+        file_counted: bool,
+        requested_extended: bool,
+        requested_counted: bool,
+    },
+
+    /// Sequence is too long to fit in an extended record's packed buffer.
+    #[error("Invalid sequence length: {len} (must be <= {max})")]
+    InvalidSequenceLength { len: usize, max: usize },
+
+    /// Expecting sorted IBU records but found unsorted
+    #[error("Found an unsorted IBU record when expecting sorted")]
+    ExpectingSortedIbu,
+
+    /// A record's index exceeds the caller-provided maximum.
+    ///
+    /// Raised during UMI counting when a record's index falls outside the
+    /// provided feature list - usually a sign of a mismatched feature file.
+    #[error("Record index ({index}) exceeds the maximum expected index ({max_index}) - likely an incorrect feature list")]
+    IndexExceedsMax { index: u64, max_index: u64 },
+
     /// Error occurred during parallel processing.
     ///
     /// This wraps errors that occur in user-defined parallel processors,
@@ -127,52 +159,14 @@ pub enum IbuError {
     Process(Box<dyn StdError + Send + Sync>),
 }
 
-/// Trait for converting errors into `IbuError::Process` variants.
-///
-/// This trait provides a convenient way to convert custom error types
-/// into IBU errors for use in parallel processing contexts.
-///
-/// # Examples
-///
-/// ```rust
-/// use ibu::{IntoIbuError, IbuError};
-/// use std::fmt;
-///
-/// #[derive(Debug)]
-/// struct CustomError(String);
-///
-/// impl fmt::Display for CustomError {
-///     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-///         write!(f, "Custom error: {}", self.0)
-///     }
-/// }
-///
-/// impl std::error::Error for CustomError {}
-///
-/// // Convert to IbuError
-/// let custom_err = CustomError("something went wrong".to_string());
-/// let ibu_err = custom_err.into_ibu_error();
-///
-/// match ibu_err {
-///     IbuError::Process(_) => println!("Converted successfully"),
-///     _ => unreachable!(),
-/// }
-/// ```
-pub trait IntoIbuError {
-    /// Converts the error into an `IbuError`.
-    fn into_ibu_error(self) -> IbuError;
-}
-
-/// Blanket implementation for all error types.
-///
-/// Any type that implements `std::error::Error + Send + Sync + 'static`
-/// can be automatically converted to `IbuError::Process`.
-impl<E> IntoIbuError for E
-where
-    E: std::error::Error + Send + Sync + 'static,
-{
-    fn into_ibu_error(self) -> IbuError {
-        IbuError::Process(self.into())
+impl IbuError {
+    /// Wraps any error into an [`IbuError::Process`] variant, e.g. for
+    /// propagating custom errors through parallel processing contexts.
+    pub fn process<E>(err: E) -> Self
+    where
+        E: StdError + Send + Sync + 'static,
+    {
+        IbuError::Process(err.into())
     }
 }
 
@@ -205,11 +199,12 @@ mod tests {
 
         // Test InvalidVersion
         let err = IbuError::InvalidVersion {
-            expected: 2,
+            min: 2,
+            max: 3,
             actual: 1,
         };
         let display = format!("{}", err);
-        assert!(display.contains("expected (2)"));
+        assert!(display.contains("supported versions (2-3)"));
         assert!(display.contains("found (1)"));
 
         // Test TruncatedRecord
@@ -284,9 +279,9 @@ mod tests {
     }
 
     #[test]
-    fn test_into_ibu_error_trait() {
+    fn test_process_constructor() {
         let custom_err = CustomError("test".to_string());
-        let ibu_err = custom_err.into_ibu_error();
+        let ibu_err = IbuError::process(custom_err);
 
         match ibu_err {
             IbuError::Process(boxed) => {
@@ -361,7 +356,7 @@ mod tests {
             message: "Processing failed".to_string(),
         };
 
-        let ibu_err = thread_err.into_ibu_error();
+        let ibu_err = IbuError::process(thread_err);
         let display = format!("{}", ibu_err);
 
         assert!(display.contains("Thread 3 error"));

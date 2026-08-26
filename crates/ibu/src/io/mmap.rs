@@ -4,11 +4,11 @@
 //! for parallel processing. Memory mapping allows the operating system to handle
 //! file I/O efficiently while providing zero-copy access to records.
 
-use std::{fs::File, path::Path, sync::Arc, thread};
+use std::{fs::File, marker::PhantomData, path::Path, sync::Arc, thread};
 
 use memmap2::Mmap;
 
-use crate::{parallel::ParallelReader, Header, IbuError, Record, HEADER_SIZE, RECORD_SIZE};
+use crate::{parallel::ParallelProcessor, Header, IbuError, IbuRecord, Record, HEADER_SIZE};
 
 /// Memory-mapped reader for IBU files.
 ///
@@ -42,10 +42,10 @@ use crate::{parallel::ParallelReader, Header, IbuError, Record, HEADER_SIZE, REC
 /// ## Basic Usage
 ///
 /// ```rust,no_run
-/// use ibu::MmapReader;
+/// use ibu::{MmapReader, Record};
 ///
 /// # fn main() -> ibu::Result<()> {
-/// let reader = MmapReader::new("large_dataset.ibu")?;
+/// let reader: MmapReader<Record> = MmapReader::new("large_dataset.ibu")?;
 ///
 /// println!("File contains {} records", reader.len());
 /// println!("Barcode length: {}", reader.header().bc_len);
@@ -62,7 +62,7 @@ use crate::{parallel::ParallelReader, Header, IbuError, Record, HEADER_SIZE, REC
 /// ## Parallel Processing
 ///
 /// ```rust,no_run
-/// use ibu::{MmapReader, ParallelProcessor, ParallelReader, Record};
+/// use ibu::{MmapReader, ParallelProcessor, Record};
 /// use std::sync::{Arc, Mutex};
 ///
 /// #[derive(Clone, Default)]
@@ -85,7 +85,7 @@ use crate::{parallel::ParallelReader, Header, IbuError, Record, HEADER_SIZE, REC
 /// }
 ///
 /// # fn main() -> ibu::Result<()> {
-/// let reader = MmapReader::new("data.ibu")?;
+/// let reader: MmapReader<Record> = MmapReader::new("data.ibu")?;
 /// let counter = RecordCounter::default();
 ///
 /// // Process with all available CPU cores
@@ -97,16 +97,18 @@ use crate::{parallel::ParallelReader, Header, IbuError, Record, HEADER_SIZE, REC
 /// # }
 /// ```
 #[derive(Clone)]
-pub struct MmapReader {
+pub struct MmapReader<T: IbuRecord = Record> {
     /// Memory-mapped file data (shared across clones)
     map: Arc<Mmap>,
     /// Parsed file header
     header: Header,
     /// Number of records in the file
     len: usize,
+    /// Marker for the record type being read
+    _record: PhantomData<T>,
 }
 #[allow(clippy::len_without_is_empty)]
-impl MmapReader {
+impl<T: IbuRecord> MmapReader<T> {
     /// Creates a new memory-mapped reader from a file path.
     ///
     /// Opens the file and maps it into memory. The header is parsed and validated
@@ -132,10 +134,10 @@ impl MmapReader {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use ibu::MmapReader;
+    /// use ibu::{MmapReader, Record};
     ///
     /// # fn main() -> ibu::Result<()> {
-    /// let reader = MmapReader::new("data.ibu")?;
+    /// let reader: MmapReader<Record> = MmapReader::new("data.ibu")?;
     /// println!("Successfully mapped {} records", reader.len());
     /// # Ok(())
     /// # }
@@ -150,14 +152,20 @@ impl MmapReader {
             header.validate()?;
             header
         };
+        header.matches_record_type::<T>()?;
 
         let record_buffer = &map[HEADER_SIZE..];
-        if record_buffer.len() % RECORD_SIZE != 0 {
+        if record_buffer.len() % T::SIZE != 0 {
             return Err(IbuError::InvalidMapSize);
         }
-        let len = record_buffer.len() / RECORD_SIZE;
+        let len = record_buffer.len() / T::SIZE;
 
-        Ok(Self { map, header, len })
+        Ok(Self {
+            map,
+            header,
+            len,
+            _record: PhantomData,
+        })
     }
     /// Returns the number of records in the file.
     ///
@@ -167,10 +175,10 @@ impl MmapReader {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use ibu::MmapReader;
+    /// use ibu::{MmapReader, Record};
     ///
     /// # fn main() -> ibu::Result<()> {
-    /// let reader = MmapReader::new("data.ibu")?;
+    /// let reader: MmapReader<Record> = MmapReader::new("data.ibu")?;
     /// println!("File contains {} records", reader.len());
     /// # Ok(())
     /// # }
@@ -186,10 +194,10 @@ impl MmapReader {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use ibu::MmapReader;
+    /// use ibu::{MmapReader, Record};
     ///
     /// # fn main() -> ibu::Result<()> {
-    /// let reader = MmapReader::new("data.ibu")?;
+    /// let reader: MmapReader<Record> = MmapReader::new("data.ibu")?;
     /// let header = reader.header();
     ///
     /// println!("Barcode length: {}", header.bc_len);
@@ -229,10 +237,10 @@ impl MmapReader {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use ibu::MmapReader;
+    /// use ibu::{MmapReader, Record};
     ///
     /// # fn main() -> ibu::Result<()> {
-    /// let reader = MmapReader::new("data.ibu")?;
+    /// let reader: MmapReader<Record> = MmapReader::new("data.ibu")?;
     ///
     /// // Get first 1000 records
     /// let first_batch = reader.slice(0, 1000)?;
@@ -250,7 +258,7 @@ impl MmapReader {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn slice(&self, start: usize, end: usize) -> crate::Result<&[Record]> {
+    pub fn slice(&self, start: usize, end: usize) -> crate::Result<&[T]> {
         if start >= self.len || end > self.len {
             return Err(IbuError::InvalidIndex {
                 idx: end,
@@ -263,8 +271,8 @@ impl MmapReader {
                 max: self.len,
             });
         }
-        let start = HEADER_SIZE + (start * RECORD_SIZE);
-        let end = HEADER_SIZE + (end * RECORD_SIZE);
+        let start = HEADER_SIZE + (start * T::SIZE);
+        let end = HEADER_SIZE + (end * T::SIZE);
         let records = bytemuck::cast_slice(&self.map[start..end]);
         Ok(records)
     }
@@ -283,16 +291,33 @@ impl MmapReader {
 /// `on_batch_complete()` after each chunk.
 pub const BATCH_SIZE: usize = 1024 * 1024;
 
-impl ParallelReader for MmapReader {
-    fn process_parallel<P: crate::parallel::ParallelProcessor + Clone + 'static>(
+impl<T: IbuRecord> MmapReader<T> {
+    /// Processes all records in parallel using the specified processor.
+    ///
+    /// Divides the records evenly across the specified number of threads; each
+    /// thread gets its own clone of the processor and processes its range in
+    /// batches of [`BATCH_SIZE`], calling
+    /// [`on_batch_complete`](ParallelProcessor::on_batch_complete) after each.
+    ///
+    /// # Arguments
+    ///
+    /// * `processor` - The processor to use for handling records
+    /// * `num_threads` - Number of threads to use (0 = use all available cores)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the processor fails in `process_record` or
+    /// `on_batch_complete`; the first error stops the entire operation.
+    pub fn process_parallel<P: ParallelProcessor<T> + Clone + 'static>(
         &self,
         processor: P,
         num_threads: usize,
     ) -> crate::Result<()> {
+        let available = std::thread::available_parallelism().map_or(1, |n| n.get());
         let num_threads = if num_threads == 0 {
-            num_cpus::get()
+            available
         } else {
-            num_threads.min(num_cpus::get())
+            num_threads.min(available)
         };
         let records_per_thread = self.len / num_threads;
         let remainder = self.len % num_threads; // for last thread
@@ -334,7 +359,7 @@ impl ParallelReader for MmapReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Header, Record, Writer};
+    use crate::{Header, Record, Writer, RECORD_SIZE};
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
@@ -383,7 +408,7 @@ mod tests {
 
         create_test_file(temp_file, &records);
 
-        let reader = MmapReader::new(temp_file).unwrap();
+        let reader: MmapReader<Record> = MmapReader::new(temp_file).unwrap();
         assert_eq!(reader.len(), 3);
 
         let header = reader.header();
@@ -400,7 +425,7 @@ mod tests {
 
         create_test_file(temp_file, &records);
 
-        let reader = MmapReader::new(temp_file).unwrap();
+        let reader: MmapReader<Record> = MmapReader::new(temp_file).unwrap();
 
         // Test full slice
         let full_slice = reader.slice(0, 100).unwrap();
@@ -429,7 +454,7 @@ mod tests {
 
         create_test_file(temp_file, &records);
 
-        let reader = MmapReader::new(temp_file).unwrap();
+        let reader: MmapReader<Record> = MmapReader::new(temp_file).unwrap();
 
         // Test out of bounds
         assert!(matches!(
@@ -461,7 +486,7 @@ mod tests {
 
         create_test_file(temp_file, &records);
 
-        let reader = MmapReader::new(temp_file).unwrap();
+        let reader: MmapReader<Record> = MmapReader::new(temp_file).unwrap();
         let processor = TestProcessor::default();
 
         // Process with 4 threads
@@ -487,7 +512,7 @@ mod tests {
 
         create_test_file(temp_file, &records);
 
-        let reader = MmapReader::new(temp_file).unwrap();
+        let reader: MmapReader<Record> = MmapReader::new(temp_file).unwrap();
         let processor = TestProcessor::default();
 
         // Process with auto thread count (0)
@@ -506,7 +531,7 @@ mod tests {
 
         create_test_file(temp_file, &records);
 
-        let reader = MmapReader::new(temp_file).unwrap();
+        let reader: MmapReader<Record> = MmapReader::new(temp_file).unwrap();
         assert_eq!(reader.len(), 0);
 
         let processor = TestProcessor::default();
@@ -525,7 +550,7 @@ mod tests {
 
         create_test_file(temp_file, &records);
 
-        let reader = MmapReader::new(temp_file).unwrap();
+        let reader: MmapReader<Record> = MmapReader::new(temp_file).unwrap();
         let reader_clone = reader.clone();
 
         // Both should have same data
@@ -553,7 +578,7 @@ mod tests {
 
         create_test_file(temp_file, &records);
 
-        let reader = MmapReader::new(temp_file).unwrap();
+        let reader: MmapReader<Record> = MmapReader::new(temp_file).unwrap();
         assert_eq!(reader.len(), num_records as usize);
 
         // Test random access
@@ -565,10 +590,99 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn test_batch_size_constant() {
         assert_eq!(BATCH_SIZE, 1024 * 1024);
         assert!(BATCH_SIZE > 0);
         // Should be reasonable size for memory usage
         assert!(BATCH_SIZE * RECORD_SIZE < 100 * 1024 * 1024); // < 100MB
+    }
+
+    use crate::ExtRecord;
+
+    fn create_ext_test_file(path: &str, records: &[ExtRecord]) {
+        let header = Header::new(16, 12);
+        let file = fs::File::create(path).unwrap();
+        let mut writer: Writer<_, ExtRecord> = Writer::new(file, header).unwrap();
+        writer.write_batch(records).unwrap();
+        writer.finish().unwrap();
+    }
+
+    #[test]
+    fn test_mmap_ext_records() {
+        let temp_file = "test_mmap_ext.ibu";
+        let records: Vec<ExtRecord> = (0..1000)
+            .map(|i| ExtRecord::from_sequence(i, i * 2, i * 3, b"ACGTACGTTTGG").unwrap())
+            .collect();
+
+        create_ext_test_file(temp_file, &records);
+
+        let reader: MmapReader<ExtRecord> = MmapReader::new(temp_file).unwrap();
+        assert!(reader.header().extended());
+        assert_eq!(reader.len(), 1000);
+
+        let slice = reader.slice(0, 1000).unwrap();
+        assert_eq!(slice, records.as_slice());
+        let buf = slice[999].decode_sequence().unwrap();
+        assert_eq!(buf.seq(), b"ACGTACGTTTGG");
+
+        fs::remove_file(temp_file).unwrap();
+    }
+
+    #[test]
+    fn test_mmap_record_type_mismatch() {
+        let temp_file = "test_mmap_type_mismatch.ibu";
+        create_test_file(temp_file, &[Record::new(1, 2, 3)]);
+
+        let result: crate::Result<MmapReader<ExtRecord>> = MmapReader::new(temp_file);
+        assert!(matches!(
+            result,
+            Err(IbuError::RecordTypeMismatch {
+                file_extended: false,
+                requested_extended: true,
+                ..
+            })
+        ));
+
+        fs::remove_file(temp_file).unwrap();
+    }
+
+    #[derive(Clone, Default)]
+    struct ExtSeqLenSum {
+        local_sum: u64,
+        global_sum: Arc<AtomicU64>,
+    }
+
+    impl crate::parallel::ParallelProcessor<ExtRecord> for ExtSeqLenSum {
+        fn process_record(&mut self, record: ExtRecord) -> crate::Result<()> {
+            self.local_sum += record.seq_len;
+            Ok(())
+        }
+
+        fn on_batch_complete(&mut self) -> crate::Result<()> {
+            self.global_sum.fetch_add(self.local_sum, Ordering::Relaxed);
+            self.local_sum = 0;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_mmap_ext_parallel_processing() {
+        let temp_file = "test_mmap_ext_parallel.ibu";
+        let num_records = 10_000u64;
+        let records: Vec<ExtRecord> = (0..num_records)
+            .map(|i| ExtRecord::from_sequence(i, i, i, b"ACGTACGT").unwrap())
+            .collect();
+
+        create_ext_test_file(temp_file, &records);
+
+        let reader: MmapReader<ExtRecord> = MmapReader::new(temp_file).unwrap();
+        let processor = ExtSeqLenSum::default();
+        reader.process_parallel(processor.clone(), 4).unwrap();
+
+        let total = processor.global_sum.load(Ordering::Relaxed);
+        assert_eq!(total, num_records * 8);
+
+        fs::remove_file(temp_file).unwrap();
     }
 }

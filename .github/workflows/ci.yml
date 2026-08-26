@@ -1,23 +1,18 @@
 name: Rust
 
-on: push
+on:
+  push:
+    branches: [main]
+  pull_request:
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  ci:
-    needs: [build, test]
-    name: CI
-    runs-on: "ubuntu-latest"
-    steps:
-      - name: Done
-        run: exit 0
-
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       - name: Build
         run: cargo build --verbose
 
@@ -25,6 +20,16 @@ jobs:
     name: Test
     runs-on: "ubuntu-latest"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       - name: Test
         run: cargo test --verbose
+
+  lint:
+    name: Lint
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run Fmt
+        run: cargo fmt --all --check
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings

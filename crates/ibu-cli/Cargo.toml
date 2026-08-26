@@ -1,0 +1,25 @@
+[package]
+name = "ibu-cli"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Command-line toolkit for IBU files (view, cat, sort)"
+keywords = ["bioinformatics", "genomics", "binary", "single-cell", "cli"]
+categories = ["command-line-utilities", "science"]
+
+[[bin]]
+name = "ibu"
+path = "src/main.rs"
+
+[dependencies]
+ibu = { workspace = true }
+anyhow = { workspace = true }
+bitnuc = { workspace = true }
+clap = { workspace = true }
+niffler = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -77,7 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(read_header.umi_len, header.umi_len);
         assert_eq!(read_header.sorted(), header.sorted());
 
-        for result in reader {
+        for result in reader.iter_records()? {
             let record = result?;
             records_read += 1;
 
@@ -87,7 +87,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             checksum ^= record.index;
 
             // Progress indicator
-            if records_read % 10_000_000 == 0 {
+            if records_read.is_multiple_of(10_000_000) {
                 let elapsed = read_start.elapsed().as_secs_f64();
                 let rate = records_read as f64 / elapsed / 1_000_000.0;
                 print!(
@@ -120,7 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ========== Direct Load ===========
     let start = Instant::now();
-    let (_header, records) = load_to_vec(filename)?;
+    let (_header, records): (Header, Vec<Record>) = load_to_vec(filename)?;
     let elapsed = start.elapsed();
     let load_rate = records.len() as f64 / elapsed.as_secs_f64() / 1_000_000.0;
     let load_bandwidth = (records.len() * 24) as f64 / elapsed.as_secs_f64() / 1_000_000_000.0;

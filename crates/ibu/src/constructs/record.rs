@@ -1,5 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 
+use crate::IbuRecord;
+
 pub const RECORD_SIZE: usize = std::mem::size_of::<Record>();
 
 /// Binary format record for IBU files.
@@ -34,7 +36,7 @@ pub const RECORD_SIZE: usize = std::mem::size_of::<Record>();
 /// # Examples
 ///
 /// ```rust
-/// use ibu::Record;
+/// use ibu::{IbuRecord, Record};
 ///
 /// // Create a new record
 /// let record = Record::new(0x1234, 0x5678, 42);
@@ -56,8 +58,7 @@ pub const RECORD_SIZE: usize = std::mem::size_of::<Record>();
 /// assert_eq!(record, reconstructed);
 /// ```
 #[derive(Copy, Clone, Pod, Zeroable, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-#[cfg(feature = "serde")]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(C)]
 pub struct Record {
     pub barcode: u64,
@@ -91,44 +92,37 @@ impl Record {
             index,
         }
     }
-    /// Returns the record as a byte slice.
-    ///
-    /// Uses zero-copy conversion via `bytemuck` to get a view of the record
-    /// as bytes, suitable for writing to files or network streams.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use ibu::Record;
-    ///
-    /// let record = Record::new(0x1234, 0x5678, 42);
-    /// let bytes = record.as_bytes();
-    /// assert_eq!(bytes.len(), 24); // RECORD_SIZE
-    /// ```
-    pub fn as_bytes(&self) -> &[u8] {
-        bytemuck::bytes_of(self)
+}
+
+impl IbuRecord for Record {
+    const EXTENDED: bool = false;
+    const COUNTED: bool = false;
+
+    type Counted = crate::RecordCount;
+
+    #[inline(always)]
+    fn barcode(&self) -> u64 {
+        self.barcode
     }
-    /// Creates a record from a byte slice.
-    ///
-    /// Uses zero-copy conversion via `bytemuck` to interpret bytes as a Record.
-    /// The input slice must be exactly 24 bytes long.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the input slice is not exactly 24 bytes.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use ibu::Record;
-    ///
-    /// let original = Record::new(0x1234, 0x5678, 42);
-    /// let bytes = original.as_bytes();
-    /// let reconstructed = Record::from_bytes(bytes);
-    /// assert_eq!(original, reconstructed);
-    /// ```
-    pub fn from_bytes(bytes: &[u8]) -> Self {
-        *bytemuck::from_bytes(bytes)
+
+    #[inline(always)]
+    fn umi(&self) -> u64 {
+        self.umi
+    }
+
+    #[inline(always)]
+    fn set_umi(&mut self, umi: u64) {
+        self.umi = umi;
+    }
+
+    #[inline(always)]
+    fn index(&self) -> u64 {
+        self.index
+    }
+
+    #[inline(always)]
+    fn to_counted(&self, count: u64) -> Self::Counted {
+        crate::RecordCount::new(*self, count)
     }
 }
 
@@ -274,7 +268,7 @@ mod tests {
         assert_ne!(record1, record3);
 
         // Test Clone and Copy
-        let cloned = record1.clone();
+        let cloned = record1;
         assert_eq!(record1, cloned);
 
         let copied = record1;
