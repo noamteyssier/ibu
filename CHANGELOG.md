@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.1]
 
 ### Changed
-- `BarcodeUmiCounts::insert_count` and `insert_seq_count` reuse the last outer map entry when the barcode repeats, skipping the outer BTree search on barcode-sorted input (~26% faster `ibu count`)
+- Faster `ibu count` on barcode-sorted input (~26%)
 
 ## [0.2.1]
 

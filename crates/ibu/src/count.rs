@@ -237,15 +237,18 @@ pub struct BarcodeUmiCounts {
     stats: UmiCountStats,
 }
 
+/// Input is barcode-sorted: reuse the last entry to skip the BTree search.
+fn slot<V: Default>(map: &mut BTreeMap<u64, V>, barcode: u64) -> &mut V {
+    if map.last_key_value().is_some_and(|(k, _)| *k == barcode) {
+        return map.last_entry().unwrap().into_mut();
+    }
+    map.entry(barcode).or_default()
+}
+
 impl BarcodeUmiCounts {
     /// Adds UMIs to a (barcode, index) entry.
     fn insert_count(&mut self, barcode: u64, index: u64, count: u64) {
-        // Input is barcode-sorted: reuse the last outer entry to skip the outer search.
-        let inner = match self.counts.last_entry() {
-            Some(e) if *e.key() == barcode => e.into_mut(),
-            _ => self.counts.entry(barcode).or_default(),
-        };
-        let entry = inner.entry(index);
+        let entry = slot(&mut self.counts, barcode).entry(index);
         if matches!(entry, std::collections::btree_map::Entry::Vacant(_)) {
             self.nnz += 1;
         }
@@ -254,11 +257,7 @@ impl BarcodeUmiCounts {
 
     /// Adds UMIs to a (barcode, index, sequence) entry.
     fn insert_seq_count(&mut self, barcode: u64, index: u64, seq: SeqKey, count: u64) {
-        let inner = match self.seq_counts.last_entry() {
-            Some(e) if *e.key() == barcode => e.into_mut(),
-            _ => self.seq_counts.entry(barcode).or_default(),
-        };
-        let entry = inner.entry((index, seq));
+        let entry = slot(&mut self.seq_counts, barcode).entry((index, seq));
         if matches!(entry, std::collections::btree_map::Entry::Vacant(_)) {
             self.seq_nnz += 1;
         }
