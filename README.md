@@ -104,6 +104,19 @@ Beyond basic I/O, the library provides:
 
 See the [documentation](https://docs.rs/ibu/latest/ibu/) for details and examples.
 
+# Development
+
+Commits are checked with [`prek`](https://github.com/j178/prek), which runs `cargo fmt --check` and `cargo clippy --all-targets --all-features -- -D warnings`.
+`prek` **must be installed** and registered in your clone before committing:
+
+```bash
+# installs prek (uv tool install -U prek) and registers the git hook
+just hooks
+
+# run all hooks manually
+just lint
+```
+
 # License
 
 This project is licensed under the MIT License.
