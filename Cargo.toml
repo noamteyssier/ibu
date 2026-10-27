@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/ibu", "crates/ibu-cli"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Noam Teyssier"]
 edition = "2021"
 license = "MIT"
@@ -12,7 +12,7 @@ readme = "README.md"
 
 [workspace.dependencies]
 # internal
-ibu = { path = "crates/ibu", version = "0.3.0" }
+ibu = { path = "crates/ibu", version = "0.3.1" }
 
 # external
 anyhow = "1.0.100"
